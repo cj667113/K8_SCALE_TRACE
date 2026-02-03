@@ -18,7 +18,7 @@ from kubernetes.client import ApiException
 APP_TITLE = "Scaleout Controller"
 
 TARGET_NAMESPACE = os.getenv("TARGET_NAMESPACE", "default")
-TARGET_DEPLOYMENT = os.getenv("TARGET_DEPLOYMENT", "sample-app")
+TARGET_DEPLOYMENT = os.getenv("TARGET_DEPLOYMENT", "scaleout-ui")
 MAX_PODS_PER_NODE = int(os.getenv("MAX_PODS_PER_NODE", os.getenv("REPLICAS_PER_NODE", "20")))
 MAX_PODS_PER_NODE = max(1, min(MAX_PODS_PER_NODE, 20))
 NODE_SELECTOR = os.getenv("NODE_SELECTOR", "").strip()
