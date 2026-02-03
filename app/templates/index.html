@@ -590,6 +590,8 @@
   const clearHistory = document.getElementById('clearHistory');
   const eventTabs = Array.from(document.querySelectorAll('.event-tab'));
   let eventSource = null;
+  let sseDone = false;
+  let sseJobId = null;
 
   const eventHistory = [];
   let currentRunRows = [];
@@ -642,8 +644,13 @@
   });
 
   let autoScrollLogs = true;
+  let lastLogLine = null;
 
   function addLog(line) {
+    if (line === lastLogLine) {
+      return;
+    }
+    lastLogLine = line;
     state.logs.push(line);
     const div = document.createElement('div');
     div.className = 'log-line';
@@ -1029,10 +1036,22 @@
       if (eventSource) {
         eventSource.close();
       }
+      sseDone = false;
+      sseJobId = data.jobId;
       eventSource = new EventSource('/api/stream/' + data.jobId);
       eventSource.onmessage = (event) => addLog(event.data);
-      eventSource.addEventListener('done', () => addLog('Log stream closed.'));
-      eventSource.onerror = () => addLog('Log stream error or closed.');
+      eventSource.addEventListener('done', () => {
+        sseDone = true;
+        addLog('Log stream closed.');
+        if (eventSource) {
+          eventSource.close();
+        }
+      });
+      eventSource.onerror = () => {
+        if (!sseDone) {
+          addLog('Log stream error. Reconnecting...');
+        }
+      };
     } catch (err) {
       addLog('Scale request error: ' + err);
     }
