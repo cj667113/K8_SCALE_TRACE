@@ -24,6 +24,7 @@ The app does not directly scale nodes. Use OCI Kubernetes Autoscaler to add/remo
 - `POLL_INTERVAL` (default: `5` seconds)
 - `STATUS_INTERVAL` (default: `15` seconds)
 - `TIMEOUT_SECONDS` (default: `3600`)
+- `UI_ONLY_MODE` (default: `false`) set `true` to run the UI without a Kubernetes cluster.
 
 ## Build and run locally
 ```bash
@@ -33,6 +34,7 @@ docker run --rm -p 8000:8000 \
   -e TARGET_NAMESPACE=default \
   -e TARGET_DEPLOYMENT=sample-app \
   -e MAX_PODS_PER_NODE=20 \
+  -e UI_ONLY_MODE=true \
   scaleout-ui:local
 ```
 

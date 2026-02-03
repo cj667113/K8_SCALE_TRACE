@@ -25,6 +25,7 @@ NODE_SELECTOR = os.getenv("NODE_SELECTOR", "").strip()
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "5"))
 STATUS_INTERVAL = float(os.getenv("STATUS_INTERVAL", "15"))
 TIMEOUT_SECONDS = int(os.getenv("TIMEOUT_SECONDS", "3600"))
+UI_ONLY_MODE = os.getenv("UI_ONLY_MODE", "false").lower() in {"1", "true", "yes"}
 
 app = FastAPI(title=APP_TITLE)
 
@@ -59,24 +60,33 @@ def log(job: ScaleJob, message: str) -> None:
         job.logs.append(line)
 
 
-def load_k8s() -> None:
+def load_k8s() -> bool:
+    if UI_ONLY_MODE:
+        return False
     try:
         config.load_incluster_config()
+        return True
     except Exception:
         config.load_kube_config()
+        return True
+
 
 
 @app.on_event("startup")
 def startup() -> None:
-    load_k8s()
-    app.state.core = client.CoreV1Api()
-    app.state.apps = client.AppsV1Api()
+    app.state.k8s_enabled = load_k8s()
+    if app.state.k8s_enabled:
+        app.state.core = client.CoreV1Api()
+        app.state.apps = client.AppsV1Api()
     template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
     with open(template_path, "r", encoding="utf-8") as handle:
         app.state.index_template = handle.read()
 
 
+
 def list_worker_nodes() -> List[client.V1Node]:
+    if not getattr(app.state, "k8s_enabled", False):
+        return []
     core: client.CoreV1Api = app.state.core
     nodes = core.list_node(label_selector=NODE_SELECTOR or None).items
     if NODE_SELECTOR:
@@ -109,6 +119,8 @@ def count_nodes(nodes: List[client.V1Node]) -> Tuple[int, int]:
 
 
 def read_deployment_ready(namespace: str, name: str) -> Tuple[int, int]:
+    if not getattr(app.state, "k8s_enabled", False):
+        return 0, 0
     apps: client.AppsV1Api = app.state.apps
     dep = apps.read_namespaced_deployment(name=name, namespace=namespace)
     desired = dep.spec.replicas or 0
@@ -117,9 +129,49 @@ def read_deployment_ready(namespace: str, name: str) -> Tuple[int, int]:
 
 
 def scale_deployment(namespace: str, name: str, replicas: int) -> None:
+    if not getattr(app.state, "k8s_enabled", False):
+        return
     apps: client.AppsV1Api = app.state.apps
     body = {"spec": {"replicas": replicas}}
     apps.patch_namespaced_deployment_scale(name=name, namespace=namespace, body=body)
+
+
+def simulate_scale_job(job: ScaleJob) -> None:
+    try:
+        log(
+            job,
+            "Scale request received: "
+            f"pods={job.requested_pods}, expected_nodes={job.expected_nodes}, "
+            f"max_pods_per_node={MAX_PODS_PER_NODE}.",
+        )
+        log(job, "Node scaling disabled; relying on Kubernetes autoscaler.")
+        log(job, f"Target deployment {TARGET_NAMESPACE}/{TARGET_DEPLOYMENT} -> {job.requested_pods} replicas.")
+
+        start = time.monotonic()
+        expected_nodes = job.expected_nodes
+        nodes_ready = 0
+        pods_ready = 0
+
+        for step in range(1, 5):
+            time.sleep(0.5)
+            nodes_ready = min(expected_nodes, nodes_ready + max(1, expected_nodes // 3 or 1))
+            pods_ready = min(job.requested_pods, pods_ready + max(1, job.requested_pods // 3 or 1))
+            log(job, f"Status: nodes {nodes_ready} (ready {nodes_ready}, expected {expected_nodes}) | "
+                     f"pods ready {pods_ready}/{job.requested_pods}.")
+
+        t_nodes_seen = time.monotonic() - start
+        t_nodes_ready = t_nodes_seen + 1.2
+        t_pods_ready = t_nodes_ready + 1.5
+        log(job, f"Node provisioning time: {t_nodes_seen:.1f}s.")
+        log(job, f"Node ready time: {t_nodes_ready:.1f}s.")
+        log(job, f"Pod readiness time: {t_pods_ready:.1f}s.")
+    finally:
+        job.done = True
+        log(job, "Scale operation complete.")
+        global active_job_id
+        with jobs_lock:
+            if active_job_id == job.job_id:
+                active_job_id = None
 
 
 def poll_until(job: ScaleJob, expected_nodes: int, desired_pods: int) -> None:
@@ -284,7 +336,8 @@ def scale(req: ScaleRequest) -> JSONResponse:
         jobs[job_id] = job
         active_job_id = job_id
 
-    thread = threading.Thread(target=run_scale_job, args=(job,), daemon=True)
+    target = simulate_scale_job if not getattr(app.state, "k8s_enabled", False) else run_scale_job
+    thread = threading.Thread(target=target, args=(job,), daemon=True)
     thread.start()
 
     return JSONResponse({"jobId": job_id})
