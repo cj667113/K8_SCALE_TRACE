@@ -144,9 +144,9 @@
       gap: 10px;
     }
 
-    input[type=number] {
+    input[type=number], select {
       padding: 12px 14px;
-      font-size: 18px;
+      font-size: 16px;
       border-radius: 12px;
       border: 1px solid rgba(0, 0, 0, 0.08);
       background: #fff;
@@ -216,6 +216,40 @@
       font-size: 13px;
       line-height: 1.4;
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+
+    .table-wrap {
+      max-height: 360px;
+      overflow: auto;
+      border-radius: 14px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #fff;
+    }
+
+    .event-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .event-table th,
+    .event-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .event-table thead {
+      position: sticky;
+      top: 0;
+      background: #f6f3ef;
+      z-index: 1;
+    }
+
+    .event-table tr:nth-child(even) td {
+      background: rgba(15, 109, 91, 0.04);
     }
 
     .log-line {
@@ -313,9 +347,20 @@
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
+      align-items: center;
     }
 
-    @keyframes rise {
+    .graph-actions select,
+    .graph-actions input[type=number] {
+      max-width: 180px;
+    }
+
+        #timeRangeCustom,
+    #timeRangeUnit {
+      display: none;
+    }
+
+@keyframes rise {
       from { transform: translateY(16px); opacity: 0; }
       to { transform: translateY(0); opacity: 1; }
     }
@@ -377,9 +422,30 @@
       </div>
 
       <div id="tab-events" class="tab-panel" role="tabpanel">
-        <div class="card">
-          <div class="card-title">Live event stream</div>
-          <div id="logBox" class="log-box"></div>
+        <div class="grid-two">
+          <div class="card">
+            <div class="card-title">Live event stream</div>
+            <div id="logBox" class="log-box"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Scaling events</div>
+            <div class="button-row" style="margin-bottom: 10px;">
+              <button id="exportEvents" class="ghost">Export events (CSV)</button>
+            </div>
+            <div class="table-wrap">
+              <table class="event-table">
+                <thead>
+                  <tr>
+                    <th>Event</th>
+                    <th>Scheduled</th>
+                    <th>Duration</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="eventsTable"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -434,6 +500,20 @@
             </div>
           </div>
           <div class="graph-actions">
+            <label class="pill" for="timeRange">Time range</label>
+            <select id="timeRange">
+              <option value="all" selected>All</option>
+              <option value="300">Last 5 min</option>
+              <option value="600">Last 10 min</option>
+              <option value="1800">Last 30 min</option>
+              <option value="custom">Custom</option>
+            </select>
+            <input id="timeRangeCustom" type="number" min="1" step="1" value="5" aria-label="Custom time range value" />
+            <select id="timeRangeUnit">
+              <option value="sec" selected>sec</option>
+              <option value="min">min</option>
+              <option value="hr">hr</option>
+            </select>
             <button id="exportChart" class="primary">Export graph (PNG)</button>
             <button id="refreshChart" class="ghost">Refresh graph</button>
           </div>
@@ -465,6 +545,11 @@
   const chartCanvas = document.getElementById('scaleChart');
   const exportChart = document.getElementById('exportChart');
   const refreshChart = document.getElementById('refreshChart');
+  const timeRange = document.getElementById('timeRange');
+  const timeRangeCustom = document.getElementById('timeRangeCustom');
+  const timeRangeUnit = document.getElementById('timeRangeUnit');
+  const eventsTable = document.getElementById('eventsTable');
+  const exportEvents = document.getElementById('exportEvents');
   let eventSource = null;
 
   const state = {
@@ -504,6 +589,9 @@
     if (!preserveLog) {
       state.logs = [];
       logBox.innerHTML = '';
+    }
+    if (eventsTable) {
+      eventsTable.innerHTML = '';
     }
     state.startTimeMs = null;
     state.endTimeMs = null;
@@ -572,6 +660,27 @@
     });
   }
 
+  function appendEventRow(event, scheduledAt, duration, details, isoTime, data, epochMs) {
+    if (!eventsTable) return;
+    const row = document.createElement('tr');
+    if (isoTime) {
+      row.dataset.iso = isoTime;
+    }
+    if (epochMs !== null && epochMs !== undefined) {
+      row.dataset.epoch = String(epochMs);
+    }
+    if (data && typeof data === 'object') {
+      row.dataset.payload = JSON.stringify(data);
+    }
+    const cols = [event, scheduledAt, duration, details];
+    cols.forEach((value) => {
+      const td = document.createElement('td');
+      td.textContent = value;
+      row.appendChild(td);
+    });
+    eventsTable.appendChild(row);
+  }
+
   function updateSummary() {
     summaryDesiredPods.textContent = state.desiredPods !== null ? state.desiredPods : '—';
     summaryExpectedNodes.textContent = state.expectedNodes !== null ? state.expectedNodes : '—';
@@ -603,6 +712,7 @@
     if (parts.length < 2) return;
     const ts = Date.parse(parts[0]);
     const message = parts.slice(1).join(' | ');
+    const scheduledAt = Number.isFinite(ts) ? formatTime(ts) : '—';
 
     if (message.startsWith('Scale request received')) {
       resetMetrics(true);
@@ -613,6 +723,7 @@
         state.expectedNodes = parseInt(match[2], 10);
       }
       scaleHint.textContent = 'Scale job started at ' + formatTime(state.startTimeMs) + '.';
+      appendEventRow('Scale request', scheduledAt, '—', 'Pods=' + state.desiredPods, new Date(ts).toISOString(), { pods: state.desiredPods, expectedNodes: state.expectedNodes }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -633,17 +744,21 @@
       state.expectedNodes = expectedNodes;
       state.desiredPods = desiredPods;
       recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, expectedNodes, desiredPods);
+      const elapsed = state.startTimeMs ? ((Number.isFinite(ts) ? ts : Date.now()) - state.startTimeMs) / 1000 : null;
+      appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + '/' + expectedNodes + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, expectedNodes, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
     }
 
     const provisionMatch = message.match(/Node provisioning time: ([\d.]+)s/);
     if (provisionMatch) {
       state.milestones.nodeProvision = parseFloat(provisionMatch[1]);
+      appendEventRow('Node provision', scheduledAt, formatDuration(state.milestones.nodeProvision), 'Node objects seen', new Date(ts).toISOString(), { nodeProvisionSec: state.milestones.nodeProvision }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
     const nodeReadyMatch = message.match(/Node ready time: ([\d.]+)s/);
     if (nodeReadyMatch) {
       state.milestones.nodeReady = parseFloat(nodeReadyMatch[1]);
+      appendEventRow('Node ready', scheduledAt, formatDuration(state.milestones.nodeReady), 'Worker nodes ready', new Date(ts).toISOString(), { nodeReadySec: state.milestones.nodeReady }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -651,8 +766,22 @@
     if (podReadyMatch) {
       state.milestones.podReady = parseFloat(podReadyMatch[1]);
       state.endTimeMs = state.startTimeMs ? state.startTimeMs + state.milestones.podReady * 1000 : Date.now();
+      appendEventRow('Pods ready', scheduledAt, formatDuration(state.milestones.podReady), 'Pods reached Ready', new Date(ts).toISOString(), { podsReadySec: state.milestones.podReady, pods: state.desiredPods }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
+  }
+
+  function updateTimeRangeControls() {
+    if (!timeRange) return;
+    const isCustom = timeRange.value === 'custom';
+    timeRangeCustom.style.display = isCustom ? 'inline-block' : 'none';
+    timeRangeUnit.style.display = isCustom ? 'inline-block' : 'none';
+    if (!isCustom && timeRange.value !== 'all') {
+      const valueSec = parseInt(timeRange.value, 10);
+      timeRangeCustom.value = Number.isFinite(valueSec) ? Math.round(valueSec / 60) : 5;
+      timeRangeUnit.value = 'min';
+    }
+    drawChart();
   }
 
   function drawChart() {
@@ -662,7 +791,7 @@
     const height = chartCanvas.clientHeight || 320;
     chartCanvas.width = width * dpr;
     chartCanvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     if (!state.statusSamples.length) {
@@ -680,20 +809,57 @@
     }));
 
     const maxTime = Math.max(...samples.map((s) => s.t), 1);
-    const maxValue = Math.max(
+    let rangeSec = maxTime;
+    if (timeRange && timeRange.value !== 'all') {
+      if (timeRange.value === 'custom') {
+        const customValue = parseFloat(timeRangeCustom.value || '0');
+        const unit = timeRangeUnit ? timeRangeUnit.value : 'sec';
+        const multiplier = unit === 'hr' ? 3600 : unit === 'min' ? 60 : 1;
+        rangeSec = Number.isFinite(customValue) && customValue > 0 ? customValue * multiplier : maxTime;
+      } else {
+        const preset = parseInt(timeRange.value, 10);
+        rangeSec = Number.isFinite(preset) && preset > 0 ? preset : maxTime;
+      }
+    }
+    rangeSec = Math.max(10, Math.min(rangeSec, maxTime));
+
+    const windowStart = Math.max(0, maxTime - rangeSec);
+    const windowSamples = samples.filter((s) => s.t >= windowStart);
+
+    if (windowSamples.length < 2) {
+      ctx.fillStyle = '#a5a29f';
+      ctx.font = '14px "Avenir Next", sans-serif';
+      ctx.fillText('Not enough samples in the selected range.', 16, 28);
+      return;
+    }
+
+    const maxValueRaw = Math.max(
       1,
-      ...samples.map((s) => s.podsReady),
-      ...samples.map((s) => s.nodesReady)
+      ...windowSamples.map((s) => s.podsReady),
+      ...windowSamples.map((s) => s.nodesReady)
     );
 
-    const padding = { left: 48, right: 16, top: 18, bottom: 32 };
+    function niceMax(value) {
+      const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+      const scaled = value / magnitude;
+      let nice = 1;
+      if (scaled > 5) nice = 10;
+      else if (scaled > 2) nice = 5;
+      else if (scaled > 1) nice = 2;
+      return nice * magnitude;
+    }
+
+    const maxValue = niceMax(maxValueRaw);
+
+    const padding = { left: 56, right: 18, top: 18, bottom: 44 };
     const chartW = width - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
     ctx.strokeStyle = 'rgba(0,0,0,0.08)';
     ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const y = padding.top + (chartH / 4) * i;
+    const yTicks = 5;
+    for (let i = 0; i <= yTicks; i++) {
+      const y = padding.top + (chartH / yTicks) * i;
       ctx.beginPath();
       ctx.moveTo(padding.left, y);
       ctx.lineTo(width - padding.right, y);
@@ -702,16 +868,40 @@
 
     ctx.fillStyle = '#8a8077';
     ctx.font = '12px "Avenir Next", sans-serif';
-    ctx.fillText('0s', padding.left, height - 10);
-    ctx.fillText(maxTime.toFixed(0) + 's', width - padding.right - 28, height - 10);
-    ctx.fillText(String(maxValue), 8, padding.top + 8);
+    for (let i = 0; i <= yTicks; i++) {
+      const value = Math.round((maxValue / yTicks) * (yTicks - i));
+      const y = padding.top + (chartH / yTicks) * i + 4;
+      ctx.fillText(String(value), 10, y);
+    }
+
+    const xTicks = 5;
+    for (let i = 0; i <= xTicks; i++) {
+      const t = windowStart + (rangeSec / xTicks) * i;
+      const x = padding.left + ((t - windowStart) / rangeSec) * chartW;
+      ctx.beginPath();
+      ctx.moveTo(x, padding.top + chartH);
+      ctx.lineTo(x, padding.top + chartH + 6);
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.stroke();
+      ctx.fillStyle = '#8a8077';
+      ctx.fillText(t.toFixed(0) + 's', x - 10, height - 10);
+    }
+
+    ctx.save();
+    ctx.fillStyle = '#6c625a';
+    ctx.font = '12px "Avenir Next", sans-serif';
+    ctx.fillText('Time (s)', padding.left + chartW / 2 - 20, height - 4);
+    ctx.translate(16, padding.top + chartH / 2 + 24);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('Ready count', 0, 0);
+    ctx.restore();
 
     function drawLine(color, key) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      samples.forEach((sample, index) => {
-        const x = padding.left + (sample.t / maxTime) * chartW;
+      windowSamples.forEach((sample, index) => {
+        const x = padding.left + ((sample.t - windowStart) / rangeSec) * chartW;
         const y = padding.top + chartH - (sample[key] / maxValue) * chartH;
         if (index === 0) {
           ctx.moveTo(x, y);
@@ -758,6 +948,28 @@
     }
   }
 
+  function exportEventsCsv() {
+    if (!eventsTable) return;
+    const rows = [['Event', 'Scheduled', 'Scheduled ISO', 'Scheduled Epoch Ms', 'Duration', 'Details', 'Data']];
+    Array.from(eventsTable.querySelectorAll('tr')).forEach((row) => {
+      const cells = Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent || '');
+      const iso = row.dataset.iso || '';
+      const epoch = row.dataset.epoch || '';
+      const payload = row.dataset.payload || '';
+      if (cells.length) rows.push([cells[0], cells[1], iso, epoch, cells[2], cells[3], payload]);
+    });
+    const csv = rows
+      .map((row) => row.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(','))
+      .join('
+');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'scaleout-events.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
   function exportGraph() {
     const link = document.createElement('a');
     link.download = 'scaleout-graph.png';
@@ -771,7 +983,20 @@
   exportChart.addEventListener('click', exportGraph);
   refreshChart.addEventListener('click', drawChart);
   window.addEventListener('resize', drawChart);
+  if (timeRange) {
+    timeRange.addEventListener('change', updateTimeRangeControls);
+  }
+  if (timeRangeCustom) {
+    timeRangeCustom.addEventListener('input', drawChart);
+  }
+  if (timeRangeUnit) {
+    timeRangeUnit.addEventListener('change', drawChart);
+  }
+  if (exportEvents) {
+    exportEvents.addEventListener('click', exportEventsCsv);
+  }
 
+  updateTimeRangeControls();
   renderConfig();
   setDerived();
   updateSummary();
