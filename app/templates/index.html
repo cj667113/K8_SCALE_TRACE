@@ -228,15 +228,25 @@
       flex-wrap: wrap;
     }
 
-    .event-tab {
+    .event-tab,
+    .event-tabs .ghost {
       border: none;
-      padding: 6px 12px;
+      padding: 8px 14px;
       border-radius: 999px;
       background: rgba(31, 23, 19, 0.08);
       color: var(--muted);
       font-weight: 600;
       cursor: pointer;
       font-size: 12px;
+      line-height: 1;
+      min-height: 32px;
+    }
+
+    .event-tabs .ghost {
+      background: transparent;
+      border: 2px solid var(--accent);
+      color: var(--accent);
+      padding: 6px 14px;
     }
 
     .event-tab.active {
