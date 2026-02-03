@@ -649,7 +649,6 @@
     state.expectedNodes = null;
     state.desiredPods = null;
     state.statusSamples = [];
-    state.seenScaleRequest = false;
     state.lastStatusKey = null;
     state.milestones = { nodeProvision: null, nodeReady: null, podReady: null };
     updateSummary();
@@ -984,6 +983,7 @@
   }
 
   async function startScale() {
+    state.seenScaleRequest = false;
     resetMetrics(false);
     const pods = parseInt(podsInput.value || '0', 10);
     if (Number.isNaN(pods) || pods < 0) {
