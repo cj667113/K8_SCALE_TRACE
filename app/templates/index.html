@@ -851,7 +851,7 @@
 
     const maxValue = niceMax(maxValueRaw);
 
-    const padding = { left: 56, right: 18, top: 18, bottom: 44 };
+    const padding = { left: 72, right: 18, top: 18, bottom: 44 };
     const chartW = width - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
@@ -891,7 +891,7 @@
     ctx.fillStyle = '#6c625a';
     ctx.font = '12px "Avenir Next", sans-serif';
     ctx.fillText('Time (s)', padding.left + chartW / 2 - 20, height - 4);
-    ctx.translate(16, padding.top + chartH / 2 + 24);
+    ctx.translate(22, padding.top + chartH / 2 + 24);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText('Ready count', 0, 0);
     ctx.restore();
