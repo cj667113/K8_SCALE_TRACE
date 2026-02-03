@@ -120,7 +120,14 @@
 
 
     .events-grid {
-      grid-template-columns: 1.2fr 1fr;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .events-grid .card {
+      min-width: 0;
     }
 
     .grid-two {
