@@ -219,6 +219,31 @@
     }
 
 
+
+    .event-tabs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .event-tab {
+      border: none;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(31, 23, 19, 0.08);
+      color: var(--muted);
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .event-tab.active {
+      background: linear-gradient(135deg, var(--accent), #1c8a73);
+      color: #fff;
+    }
+
     .table-wrap {
       max-height: 360px;
       overflow: auto;
@@ -429,7 +454,10 @@
           </div>
           <div class="card">
             <div class="card-title">Scaling events</div>
-            <div class="button-row" style="margin-bottom: 10px;">
+            <div class="event-tabs">
+              <button class="event-tab active" data-event-tab="current">Current run</button>
+              <button class="event-tab" data-event-tab="history">History</button>
+              <button id="clearHistory" class="ghost">Clear history</button>
               <button id="exportEvents" class="ghost">Export events (CSV)</button>
             </div>
             <div class="table-wrap">
@@ -550,7 +578,28 @@
   const timeRangeUnit = document.getElementById('timeRangeUnit');
   const eventsTable = document.getElementById('eventsTable');
   const exportEvents = document.getElementById('exportEvents');
+  const clearHistory = document.getElementById('clearHistory');
+  const eventTabs = Array.from(document.querySelectorAll('.event-tab'));
   let eventSource = null;
+
+  const eventHistory = [];
+  let currentRunRows = [];
+  let activeEventTab = 'current';
+
+  function renderEventsTable() {
+    if (!eventsTable) return;
+    eventsTable.innerHTML = '';
+    const rows = activeEventTab === 'history'
+      ? eventHistory.flatMap((run) => run.rows)
+      : currentRunRows;
+    rows.forEach((row) => eventsTable.appendChild(row.cloneNode(true)));
+  }
+
+  function setEventTab(tab) {
+    activeEventTab = tab;
+    eventTabs.forEach((btn) => btn.classList.toggle('active', btn.dataset.eventTab === tab));
+    renderEventsTable();
+  }
 
   const state = {
     logs: [],
@@ -559,6 +608,8 @@
     expectedNodes: null,
     desiredPods: null,
     statusSamples: [],
+    seenScaleRequest: false,
+    lastStatusKey: null,
     milestones: {
       nodeProvision: null,
       nodeReady: null,
@@ -598,6 +649,8 @@
     state.expectedNodes = null;
     state.desiredPods = null;
     state.statusSamples = [];
+    state.seenScaleRequest = false;
+    state.lastStatusKey = null;
     state.milestones = { nodeProvision: null, nodeReady: null, podReady: null };
     updateSummary();
     drawChart();
@@ -678,7 +731,8 @@
       td.textContent = value;
       row.appendChild(td);
     });
-    eventsTable.appendChild(row);
+    currentRunRows.push(row);
+    renderEventsTable();
   }
 
   function updateSummary() {
@@ -715,7 +769,16 @@
     const scheduledAt = Number.isFinite(ts) ? formatTime(ts) : '—';
 
     if (message.startsWith('Scale request received')) {
+      if (state.seenScaleRequest) {
+        return;
+      }
+      if (currentRunRows.length) {
+        eventHistory.unshift({ startedAt: state.startTimeMs, rows: currentRunRows });
+      }
+      currentRunRows = [];
+      state.seenScaleRequest = true;
       resetMetrics(true);
+      renderEventsTable();
       state.startTimeMs = Number.isFinite(ts) ? ts : Date.now();
       const match = message.match(/pods=(\d+).*expected_nodes=(\d+)/);
       if (match) {
@@ -745,7 +808,11 @@
       state.desiredPods = desiredPods;
       recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, expectedNodes, desiredPods);
       const elapsed = state.startTimeMs ? ((Number.isFinite(ts) ? ts : Date.now()) - state.startTimeMs) / 1000 : null;
-      appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + '/' + expectedNodes + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, expectedNodes, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
+      const statusKey = nodesReady + ':' + expectedNodes + ':' + podsReady + ':' + desiredPods;
+      if (state.lastStatusKey !== statusKey) {
+        state.lastStatusKey = statusKey;
+        appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + '/' + expectedNodes + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, expectedNodes, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
+      }
     }
 
     const provisionMatch = message.match(/Node provisioning time: ([\d.]+)s/);
@@ -917,6 +984,7 @@
   }
 
   async function startScale() {
+    resetMetrics(false);
     const pods = parseInt(podsInput.value || '0', 10);
     if (Number.isNaN(pods) || pods < 0) {
       addLog('Invalid pod count.');
@@ -994,9 +1062,23 @@
   if (exportEvents) {
     exportEvents.addEventListener('click', exportEventsCsv);
   }
+  if (clearHistory) {
+    clearHistory.addEventListener('click', () => {
+      eventHistory.length = 0;
+      if (activeEventTab === 'history') {
+        renderEventsTable();
+      }
+    });
+  }
+  if (eventTabs.length) {
+    eventTabs.forEach((btn) => {
+      btn.addEventListener('click', () => setEventTab(btn.dataset.eventTab));
+    });
+  }
 
   updateTimeRangeControls();
   renderConfig();
+  setEventTab('current');
   setDerived();
   updateSummary();
   drawChart();
