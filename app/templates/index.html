@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scaleout Controller</title>
+  <style>
+    :root {
+      --ink: #1d1713;
+      --muted: #5a4e47;
+      --accent: #0f6d5b;
+      --accent-2: #e36d2f;
+      --accent-3: #1f7dcf;
+      --paper: #f7f1e7;
+      --panel: rgba(255, 255, 255, 0.8);
+      --shadow: 0 20px 60px rgba(17, 12, 8, 0.12);
+      --glass: rgba(255, 255, 255, 0.6);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Futura", "Gill Sans", "Trebuchet MS", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 20% 10%, #f4d6b8 0%, transparent 50%),
+                  radial-gradient(circle at 80% 0%, #d7f0e4 0%, transparent 55%),
+                  linear-gradient(135deg, #f7efe5 0%, #f0d5c3 45%, #e8f4ef 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+    }
+
+    .shell {
+      width: min(1200px, 95vw);
+      display: grid;
+      gap: 18px;
+      animation: rise 0.7s ease-out;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 22px 26px;
+      border-radius: 20px;
+      background: var(--glass);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      box-shadow: var(--shadow);
+    }
+
+    .title {
+      font-size: 30px;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0;
+    }
+
+    .badge {
+      background: rgba(15, 109, 91, 0.15);
+      color: var(--accent);
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+    }
+
+    .panel {
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border-radius: 22px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .tab {
+      border: none;
+      padding: 10px 16px;
+      border-radius: 999px;
+      background: rgba(31, 23, 19, 0.08);
+      color: var(--muted);
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+    }
+
+    .tab.active {
+      background: linear-gradient(135deg, var(--accent), #1c8a73);
+      color: #fff;
+      transform: translateY(-1px);
+    }
+
+    .tab-panel {
+      display: none;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .grid-two {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.85);
+      border-radius: 18px;
+      padding: 18px;
+      border: 1px solid rgba(15, 109, 91, 0.12);
+      box-shadow: 0 12px 30px rgba(15, 109, 91, 0.08);
+    }
+
+    .card-title {
+      font-weight: 700;
+      margin-bottom: 12px;
+      font-size: 16px;
+    }
+
+    .input-row {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    input[type=number] {
+      padding: 12px 14px;
+      font-size: 18px;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #fff;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button.primary {
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 16px;
+      border: none;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), #1c8a73);
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      box-shadow: 0 12px 22px rgba(15, 109, 91, 0.25);
+    }
+
+    button.primary:hover {
+      transform: translateY(-1px);
+    }
+
+    button.ghost {
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 16px;
+      border: 2px solid var(--accent);
+      color: var(--accent);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .meta {
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .pill {
+      display: inline-block;
+      margin-right: 8px;
+      margin-bottom: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(15, 109, 91, 0.12);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .log-box {
+      background: #111714;
+      color: #d7f9e8;
+      border-radius: 18px;
+      padding: 18px;
+      height: 360px;
+      overflow-y: auto;
+      font-family: "Courier New", "Lucida Console", monospace;
+      font-size: 13px;
+      line-height: 1.4;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    .log-line {
+      opacity: 0;
+      animation: fadeIn 0.4s ease forwards;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .summary-card {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 16px;
+      padding: 14px;
+      border: 1px solid rgba(31, 125, 207, 0.15);
+    }
+
+    .summary-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+    }
+
+    .summary-value {
+      font-size: 20px;
+      font-weight: 700;
+      margin-top: 8px;
+      color: var(--ink);
+    }
+
+    .timeline {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .timeline-title {
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .timeline-item {
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
+
+    .graph-wrap {
+      display: grid;
+      gap: 14px;
+    }
+
+    .graph-card {
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 18px;
+      padding: 16px;
+      border: 1px solid rgba(15, 109, 91, 0.15);
+    }
+
+    canvas {
+      width: 100%;
+      height: 320px;
+      border-radius: 12px;
+      background: #ffffff;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 6px;
+      background: currentColor;
+    }
+
+    .legend .pods { color: var(--accent-2); }
+    .legend .nodes { color: var(--accent); }
+
+    .graph-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    @keyframes rise {
+      from { transform: translateY(16px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 980px) {
+      .grid-two { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 640px) {
+      .summary-grid { grid-template-columns: 1fr; }
+      .header { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div>
+        <div class="title">Scaleout Control</div>
+        <p class="subtitle">Scale pod replicas and let autoscaler add nodes. Target max __MAX_PODS_PER_NODE__ pods per node.</p>
+      </div>
+      <div class="badge">Autoscaler-managed</div>
+    </header>
+
+    <section class="panel">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="scale" role="tab">Set Pods</button>
+        <button class="tab" data-tab="events" role="tab">Live Events</button>
+        <button class="tab" data-tab="timing" role="tab">Timing</button>
+        <button class="tab" data-tab="graph" role="tab">Scaling Graph</button>
+      </div>
+
+      <div id="tab-scale" class="tab-panel active" role="tabpanel">
+        <div class="grid-two">
+          <div class="card">
+            <div class="card-title">Set desired pods</div>
+            <div class="input-row">
+              <label for="podsInput">Desired pods</label>
+              <input id="podsInput" type="number" min="0" value="0" />
+              <div class="button-row">
+                <button id="scaleBtn" class="primary">Run scale</button>
+                <button id="clearBtn" class="ghost">Reset run</button>
+              </div>
+            </div>
+            <div class="meta" id="scaleHint">Ready to scale.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Config snapshot</div>
+            <div id="configPills"></div>
+            <div id="derivedInfo" class="meta"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-events" class="tab-panel" role="tabpanel">
+        <div class="card">
+          <div class="card-title">Live event stream</div>
+          <div id="logBox" class="log-box"></div>
+        </div>
+      </div>
+
+      <div id="tab-timing" class="tab-panel" role="tabpanel">
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="summary-label">Desired Pods</div>
+            <div id="summaryDesiredPods" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">Expected Nodes</div>
+            <div id="summaryExpectedNodes" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">Pod Ready Time</div>
+            <div id="summaryPodsReady" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">Node Ready Time</div>
+            <div id="summaryNodesReady" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">Node Provision Time</div>
+            <div id="summaryNodesProvision" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">Completion</div>
+            <div id="summaryCompletion" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">Started</div>
+            <div id="summaryStarted" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">Finished</div>
+            <div id="summaryFinished" class="summary-value">—</div>
+          </div>
+        </div>
+        <div class="timeline">
+          <div class="timeline-title">Milestones</div>
+          <div id="timelineList"></div>
+        </div>
+      </div>
+
+      <div id="tab-graph" class="tab-panel" role="tabpanel">
+        <div class="graph-wrap">
+          <div class="graph-card">
+            <canvas id="scaleChart"></canvas>
+            <div class="legend">
+              <span class="nodes">Worker nodes ready</span>
+              <span class="pods">Pods ready</span>
+            </div>
+          </div>
+          <div class="graph-actions">
+            <button id="exportChart" class="primary">Export graph (PNG)</button>
+            <button id="refreshChart" class="ghost">Refresh graph</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+<script>
+  const CONFIG = __CONFIG_JSON__;
+  const logBox = document.getElementById('logBox');
+  const podsInput = document.getElementById('podsInput');
+  const scaleBtn = document.getElementById('scaleBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const configPills = document.getElementById('configPills');
+  const derivedInfo = document.getElementById('derivedInfo');
+  const scaleHint = document.getElementById('scaleHint');
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  const panels = Array.from(document.querySelectorAll('.tab-panel'));
+  const summaryDesiredPods = document.getElementById('summaryDesiredPods');
+  const summaryExpectedNodes = document.getElementById('summaryExpectedNodes');
+  const summaryPodsReady = document.getElementById('summaryPodsReady');
+  const summaryNodesReady = document.getElementById('summaryNodesReady');
+  const summaryNodesProvision = document.getElementById('summaryNodesProvision');
+  const summaryCompletion = document.getElementById('summaryCompletion');
+  const summaryStarted = document.getElementById('summaryStarted');
+  const summaryFinished = document.getElementById('summaryFinished');
+  const timelineList = document.getElementById('timelineList');
+  const chartCanvas = document.getElementById('scaleChart');
+  const exportChart = document.getElementById('exportChart');
+  const refreshChart = document.getElementById('refreshChart');
+  let eventSource = null;
+
+  const state = {
+    logs: [],
+    startTimeMs: null,
+    endTimeMs: null,
+    expectedNodes: null,
+    desiredPods: null,
+    statusSamples: [],
+    milestones: {
+      nodeProvision: null,
+      nodeReady: null,
+      podReady: null,
+    }
+  };
+
+  function setTab(tabName) {
+    tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.tab === tabName));
+    panels.forEach((panel) => panel.classList.toggle('active', panel.id === 'tab-' + tabName));
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => setTab(tab.dataset.tab));
+  });
+
+  function addLog(line) {
+    state.logs.push(line);
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.textContent = line;
+    logBox.appendChild(div);
+    logBox.scrollTop = logBox.scrollHeight;
+    parseLogLine(line);
+  }
+
+  function resetMetrics(preserveLog) {
+    if (!preserveLog) {
+      state.logs = [];
+      logBox.innerHTML = '';
+    }
+    state.startTimeMs = null;
+    state.endTimeMs = null;
+    state.expectedNodes = null;
+    state.desiredPods = null;
+    state.statusSamples = [];
+    state.milestones = { nodeProvision: null, nodeReady: null, podReady: null };
+    updateSummary();
+    drawChart();
+    scaleHint.textContent = 'Ready to scale.';
+  }
+
+  function setDerived() {
+    const pods = parseInt(podsInput.value || '0', 10);
+    const nodes = CONFIG.maxPodsPerNode > 0 ? Math.ceil(pods / CONFIG.maxPodsPerNode) : 0;
+    derivedInfo.textContent = 'Expected nodes (max ' + CONFIG.maxPodsPerNode + ' pods/node): ' + nodes;
+  }
+
+  function renderConfig() {
+    const items = [
+      'namespace: ' + CONFIG.targetNamespace,
+      'deployment: ' + CONFIG.targetDeployment,
+      CONFIG.nodeSelector ? 'node selector: ' + CONFIG.nodeSelector : 'node selector: auto',
+      'max pods per node: ' + CONFIG.maxPodsPerNode,
+    ];
+    configPills.innerHTML = '';
+    items.forEach((item) => {
+      const span = document.createElement('span');
+      span.className = 'pill';
+      span.textContent = item;
+      configPills.appendChild(span);
+    });
+  }
+
+  function formatDuration(value) {
+    if (value === null || value === undefined) return '—';
+    return value.toFixed(1) + 's';
+  }
+
+  function formatTime(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    return date.toLocaleTimeString();
+  }
+
+  function updateTimeline() {
+    const items = [];
+    if (state.milestones.nodeProvision !== null) {
+      items.push('Node objects seen in ' + formatDuration(state.milestones.nodeProvision));
+    }
+    if (state.milestones.nodeReady !== null) {
+      items.push('Worker nodes ready in ' + formatDuration(state.milestones.nodeReady));
+    }
+    if (state.milestones.podReady !== null) {
+      items.push('Pods ready in ' + formatDuration(state.milestones.podReady));
+    }
+    if (!items.length) {
+      items.push('No milestones recorded yet.');
+    }
+    timelineList.innerHTML = '';
+    items.forEach((text) => {
+      const div = document.createElement('div');
+      div.className = 'timeline-item';
+      div.textContent = text;
+      timelineList.appendChild(div);
+    });
+  }
+
+  function updateSummary() {
+    summaryDesiredPods.textContent = state.desiredPods !== null ? state.desiredPods : '—';
+    summaryExpectedNodes.textContent = state.expectedNodes !== null ? state.expectedNodes : '—';
+    summaryPodsReady.textContent = formatDuration(state.milestones.podReady);
+    summaryNodesReady.textContent = formatDuration(state.milestones.nodeReady);
+    summaryNodesProvision.textContent = formatDuration(state.milestones.nodeProvision);
+    summaryCompletion.textContent = formatDuration(state.milestones.podReady);
+    summaryStarted.textContent = formatTime(state.startTimeMs);
+    summaryFinished.textContent = formatTime(state.endTimeMs);
+    updateTimeline();
+  }
+
+  function recordStatusSample(ts, nodesReady, podsReady, expectedNodes, desiredPods) {
+    if (!state.startTimeMs) {
+      state.startTimeMs = ts;
+    }
+    state.statusSamples.push({
+      t: ts,
+      nodesReady,
+      podsReady,
+      expectedNodes,
+      desiredPods,
+    });
+    drawChart();
+  }
+
+  function parseLogLine(line) {
+    const parts = line.split(' | ');
+    if (parts.length < 2) return;
+    const ts = Date.parse(parts[0]);
+    const message = parts.slice(1).join(' | ');
+
+    if (message.startsWith('Scale request received')) {
+      resetMetrics(true);
+      state.startTimeMs = Number.isFinite(ts) ? ts : Date.now();
+      const match = message.match(/pods=(\d+).*expected_nodes=(\d+)/);
+      if (match) {
+        state.desiredPods = parseInt(match[1], 10);
+        state.expectedNodes = parseInt(match[2], 10);
+      }
+      scaleHint.textContent = 'Scale job started at ' + formatTime(state.startTimeMs) + '.';
+      updateSummary();
+    }
+
+    if (message.startsWith('Target deployment')) {
+      const match = message.match(/->\s*(\d+)\s*replicas/);
+      if (match) {
+        state.desiredPods = parseInt(match[1], 10);
+        updateSummary();
+      }
+    }
+
+    const statusMatch = message.match(/Status: nodes (\d+) \(ready (\d+), expected (\d+)\) \| pods ready (\d+)\/(\d+)/);
+    if (statusMatch) {
+      const nodesReady = parseInt(statusMatch[2], 10);
+      const expectedNodes = parseInt(statusMatch[3], 10);
+      const podsReady = parseInt(statusMatch[4], 10);
+      const desiredPods = parseInt(statusMatch[5], 10);
+      state.expectedNodes = expectedNodes;
+      state.desiredPods = desiredPods;
+      recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, expectedNodes, desiredPods);
+    }
+
+    const provisionMatch = message.match(/Node provisioning time: ([\d.]+)s/);
+    if (provisionMatch) {
+      state.milestones.nodeProvision = parseFloat(provisionMatch[1]);
+      updateSummary();
+    }
+
+    const nodeReadyMatch = message.match(/Node ready time: ([\d.]+)s/);
+    if (nodeReadyMatch) {
+      state.milestones.nodeReady = parseFloat(nodeReadyMatch[1]);
+      updateSummary();
+    }
+
+    const podReadyMatch = message.match(/Pod readiness time: ([\d.]+)s/);
+    if (podReadyMatch) {
+      state.milestones.podReady = parseFloat(podReadyMatch[1]);
+      state.endTimeMs = state.startTimeMs ? state.startTimeMs + state.milestones.podReady * 1000 : Date.now();
+      updateSummary();
+    }
+  }
+
+  function drawChart() {
+    const ctx = chartCanvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const width = chartCanvas.clientWidth || 600;
+    const height = chartCanvas.clientHeight || 320;
+    chartCanvas.width = width * dpr;
+    chartCanvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    if (!state.statusSamples.length) {
+      ctx.fillStyle = '#a5a29f';
+      ctx.font = '14px "Avenir Next", sans-serif';
+      ctx.fillText('Waiting for status samples to draw the chart...', 16, 28);
+      return;
+    }
+
+    const start = state.startTimeMs || state.statusSamples[0].t;
+    const samples = state.statusSamples.map((sample) => ({
+      t: (sample.t - start) / 1000,
+      nodesReady: sample.nodesReady,
+      podsReady: sample.podsReady,
+    }));
+
+    const maxTime = Math.max(...samples.map((s) => s.t), 1);
+    const maxValue = Math.max(
+      1,
+      ...samples.map((s) => s.podsReady),
+      ...samples.map((s) => s.nodesReady)
+    );
+
+    const padding = { left: 48, right: 16, top: 18, bottom: 32 };
+    const chartW = width - padding.left - padding.right;
+    const chartH = height - padding.top - padding.bottom;
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = padding.top + (chartH / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#8a8077';
+    ctx.font = '12px "Avenir Next", sans-serif';
+    ctx.fillText('0s', padding.left, height - 10);
+    ctx.fillText(maxTime.toFixed(0) + 's', width - padding.right - 28, height - 10);
+    ctx.fillText(String(maxValue), 8, padding.top + 8);
+
+    function drawLine(color, key) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      samples.forEach((sample, index) => {
+        const x = padding.left + (sample.t / maxTime) * chartW;
+        const y = padding.top + chartH - (sample[key] / maxValue) * chartH;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+    }
+
+    drawLine('#0f6d5b', 'nodesReady');
+    drawLine('#e36d2f', 'podsReady');
+  }
+
+  async function startScale() {
+    const pods = parseInt(podsInput.value || '0', 10);
+    if (Number.isNaN(pods) || pods < 0) {
+      addLog('Invalid pod count.');
+      return;
+    }
+    setDerived();
+    addLog('Submitting scale request for ' + pods + ' pods...');
+    try {
+      const response = await fetch('/api/scale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pods })
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        addLog('Scale request failed: ' + (err.detail || response.statusText));
+        return;
+      }
+      const data = await response.json();
+      if (eventSource) {
+        eventSource.close();
+      }
+      eventSource = new EventSource('/api/stream/' + data.jobId);
+      eventSource.onmessage = (event) => addLog(event.data);
+      eventSource.addEventListener('done', () => addLog('Log stream closed.'));
+      eventSource.onerror = () => addLog('Log stream error or closed.');
+    } catch (err) {
+      addLog('Scale request error: ' + err);
+    }
+  }
+
+  function exportGraph() {
+    const link = document.createElement('a');
+    link.download = 'scaleout-graph.png';
+    link.href = chartCanvas.toDataURL('image/png');
+    link.click();
+  }
+
+  scaleBtn.addEventListener('click', startScale);
+  clearBtn.addEventListener('click', () => resetMetrics(false));
+  podsInput.addEventListener('input', setDerived);
+  exportChart.addEventListener('click', exportGraph);
+  refreshChart.addEventListener('click', drawChart);
+  window.addEventListener('resize', drawChart);
+
+  renderConfig();
+  setDerived();
+  updateSummary();
+  drawChart();
+</script>
+</body>
+</html>
