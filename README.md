@@ -49,12 +49,11 @@ When running outside the cluster, the app uses your local kubeconfig. Inside a c
 kubectl apply -f k8s/scaleout-ui.yaml
 ```
 
-Then port-forward or expose the service to access the UI:
-```bash
-kubectl port-forward svc/scaleout-ui 8080:80
-```
+Service is exposed via NodePort. Access the UI at:
 
-Open `http://localhost:8080` in your browser.
+```
+http://<worker-node-ip>:30080
+```
 
 ## Notes and limitations
 - The app targets a single Deployment and scales its replicas to the desired pod count.
