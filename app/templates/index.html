@@ -288,8 +288,7 @@
     }
 
     .log-line {
-      opacity: 0;
-      animation: fadeIn 0.4s ease forwards;
+      opacity: 1;
     }
 
     .summary-grid {
@@ -605,6 +604,12 @@
     rows.forEach((row) => eventsTable.appendChild(row.cloneNode(true)));
   }
 
+  function appendEventToTable(row) {
+    if (!eventsTable) return;
+    if (activeEventTab !== 'current') return;
+    eventsTable.appendChild(row.cloneNode(true));
+  }
+
   function setEventTab(tab) {
     activeEventTab = tab;
     eventTabs.forEach((btn) => btn.classList.toggle('active', btn.dataset.eventTab === tab));
@@ -741,7 +746,7 @@
       row.appendChild(td);
     });
     currentRunRows.push(row);
-    renderEventsTable();
+    appendEventToTable(row);
   }
 
   function updateSummary() {
@@ -900,7 +905,10 @@
     rangeSec = Math.max(10, Math.min(rangeSec, maxTime));
 
     const windowStart = Math.max(0, maxTime - rangeSec);
-    const windowSamples = samples.filter((s) => s.t >= windowStart);
+    const windowSamples = samples
+      .filter((s) => s.t >= windowStart)
+      .sort((a, b) => a.t - b.t)
+      .filter((s, idx, arr) => idx === 0 || s.t !== arr[idx - 1].t);
 
     if (windowSamples.length < 2) {
       ctx.fillStyle = '#a5a29f';
