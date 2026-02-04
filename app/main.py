@@ -34,6 +34,11 @@ class ScaleRequest(BaseModel):
     pods: conint(ge=0, le=200000) = Field(..., description="Desired pod replica count")
 
 
+class TargetRequest(BaseModel):
+    namespace: str = Field(..., min_length=1)
+    deployment: str = Field(..., min_length=1)
+
+
 @dataclass
 class ScaleJob:
     job_id: str
@@ -78,11 +83,23 @@ def startup() -> None:
     if app.state.k8s_enabled:
         app.state.core = client.CoreV1Api()
         app.state.apps = client.AppsV1Api()
+    app.state.target_namespace = TARGET_NAMESPACE
+    app.state.target_deployment = TARGET_DEPLOYMENT
     template_path = os.path.join(os.path.dirname(__file__), "templates", "index.html")
     with open(template_path, "r", encoding="utf-8") as handle:
         app.state.index_template = handle.read()
 
 
+
+
+
+def get_target() -> tuple[str, str]:
+    return app.state.target_namespace, app.state.target_deployment
+
+
+def set_target(namespace: str, deployment: str) -> None:
+    app.state.target_namespace = namespace
+    app.state.target_deployment = deployment
 
 def list_worker_nodes() -> List[client.V1Node]:
     if not getattr(app.state, "k8s_enabled", False):
@@ -145,7 +162,7 @@ def simulate_scale_job(job: ScaleJob) -> None:
             f"max_pods_per_node={MAX_PODS_PER_NODE}.",
         )
         log(job, "Node scaling disabled; relying on Kubernetes autoscaler.")
-        log(job, f"Target deployment {TARGET_NAMESPACE}/{TARGET_DEPLOYMENT} -> {job.requested_pods} replicas.")
+        log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {job.requested_pods} replicas.")
 
         start = time.monotonic()
         expected_nodes = job.expected_nodes
@@ -193,7 +210,7 @@ def poll_until(job: ScaleJob, expected_nodes: int, desired_pods: int) -> None:
             f"expected {expected_nodes} already satisfied.",
         )
 
-    log(job, f"Target deployment {TARGET_NAMESPACE}/{TARGET_DEPLOYMENT} -> {desired_pods} replicas.")
+    log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {desired_pods} replicas.")
 
     t_nodes_seen: Optional[float] = None
     t_nodes_ready: Optional[float] = None
@@ -214,7 +231,7 @@ def poll_until(job: ScaleJob, expected_nodes: int, desired_pods: int) -> None:
         nodes = list_worker_nodes()
         total, ready = count_nodes(nodes)
         try:
-            desired, ready_pods = read_deployment_ready(TARGET_NAMESPACE, TARGET_DEPLOYMENT)
+            desired, ready_pods = read_deployment_ready(*get_target())
         except ApiException as exc:
             log(job, f"Failed to read deployment status: {exc}")
             desired, ready_pods = desired_pods, 0
@@ -265,7 +282,7 @@ def run_scale_job(job: ScaleJob) -> None:
         log(job, "Node scaling disabled; relying on Kubernetes autoscaler.")
 
         try:
-            scale_deployment(TARGET_NAMESPACE, TARGET_DEPLOYMENT, job.requested_pods)
+            scale_deployment(*get_target(), job.requested_pods)
             log(job, f"Deployment scaled to {job.requested_pods} replicas.")
         except ApiException as exc:
             log(job, f"Deployment scale API error: {exc}")
@@ -286,8 +303,8 @@ def run_scale_job(job: ScaleJob) -> None:
 def render_index() -> str:
     config_payload = {
         "maxPodsPerNode": MAX_PODS_PER_NODE,
-        "targetNamespace": TARGET_NAMESPACE,
-        "targetDeployment": TARGET_DEPLOYMENT,
+        "targetNamespace": get_target()[0],
+        "targetDeployment": get_target()[1],
         "nodeSelector": NODE_SELECTOR,
     }
     config_json = json.dumps(config_payload)
@@ -313,13 +330,32 @@ def config_endpoint() -> JSONResponse:
     return JSONResponse(
         {
             "maxPodsPerNode": MAX_PODS_PER_NODE,
-            "targetNamespace": TARGET_NAMESPACE,
-            "targetDeployment": TARGET_DEPLOYMENT,
+            "targetNamespace": get_target()[0],
+            "targetDeployment": get_target()[1],
             "nodeSelector": NODE_SELECTOR,
         }
     )
 
 
+
+
+
+@app.get("/api/deployments")
+def list_deployments() -> JSONResponse:
+    if not getattr(app.state, "k8s_enabled", False):
+        return JSONResponse({"items": []})
+    apps: client.AppsV1Api = app.state.apps
+    items = []
+    for dep in apps.list_deployment_for_all_namespaces().items:
+        items.append({"namespace": dep.metadata.namespace, "name": dep.metadata.name})
+    items.sort(key=lambda x: (x["namespace"], x["name"]))
+    return JSONResponse({"items": items})
+
+
+@app.post("/api/target")
+def set_target_endpoint(req: TargetRequest) -> JSONResponse:
+    set_target(req.namespace, req.deployment)
+    return JSONResponse({"targetNamespace": req.namespace, "targetDeployment": req.deployment})
 @app.post("/api/scale")
 def scale(req: ScaleRequest) -> JSONResponse:
     desired_pods = req.pods

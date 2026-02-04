@@ -464,6 +464,14 @@
             <div id="configPills"></div>
             <div id="derivedInfo" class="meta"></div>
           </div>
+          <div class="card">
+            <div class="card-title">Target deployment</div>
+            <div class="input-row">
+              <label for="targetSelect">Select deployment</label>
+              <select id="targetSelect"></select>
+            </div>
+            <div class="meta" id="targetHint">Choose the workload to scale.</div>
+          </div>
         </div>
       </div>
 
@@ -580,6 +588,8 @@
   const configPills = document.getElementById('configPills');
   const derivedInfo = document.getElementById('derivedInfo');
   const scaleHint = document.getElementById('scaleHint');
+  const targetSelect = document.getElementById('targetSelect');
+  const targetHint = document.getElementById('targetHint');
   const tabs = Array.from(document.querySelectorAll('.tab'));
   const panels = Array.from(document.querySelectorAll('.tab-panel'));
   const summaryDesiredPods = document.getElementById('summaryDesiredPods');
@@ -692,6 +702,56 @@
     updateSummary();
     drawChart();
     scaleHint.textContent = 'Ready to scale.';
+  }
+
+
+  async function loadDeployments() {
+    if (!targetSelect) return;
+    try {
+      const res = await fetch('/api/deployments');
+      const data = await res.json();
+      targetSelect.innerHTML = '';
+      const items = data.items || [];
+      items.forEach((item) => {
+        const opt = document.createElement('option');
+        opt.value = item.namespace + '/' + item.name;
+        opt.textContent = item.namespace + '/' + item.name;
+        targetSelect.appendChild(opt);
+      });
+      const current = CONFIG.targetNamespace + '/' + CONFIG.targetDeployment;
+      if (items.find((i) => i.namespace + '/' + i.name === current)) {
+        targetSelect.value = current;
+      }
+      if (!items.length) {
+        targetHint.textContent = 'No deployments found (K8s disabled).';
+      }
+    } catch (err) {
+      targetHint.textContent = 'Failed to load deployments.';
+    }
+  }
+
+  async function updateTarget(value) {
+    if (!value) return;
+    const parts = value.split('/');
+    if (parts.length !== 2) return;
+    const [namespace, deployment] = parts;
+    try {
+      const res = await fetch('/api/target', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ namespace, deployment })
+      });
+      if (!res.ok) {
+        targetHint.textContent = 'Failed to update target.';
+        return;
+      }
+      CONFIG.targetNamespace = namespace;
+      CONFIG.targetDeployment = deployment;
+      targetHint.textContent = 'Target set to ' + namespace + '/' + deployment + '.';
+      renderConfig();
+    } catch (err) {
+      targetHint.textContent = 'Failed to update target.';
+    }
   }
 
   function setDerived() {
@@ -1146,6 +1206,9 @@
   podsInput.addEventListener('input', setDerived);
   exportChart.addEventListener('click', exportGraph);
   refreshChart.addEventListener('click', drawChart);
+  if (targetSelect) {
+    targetSelect.addEventListener('change', (event) => updateTarget(event.target.value));
+  }
   window.addEventListener('resize', drawChart);
   if (timeRange) {
     timeRange.addEventListener('change', updateTimeRangeControls);
@@ -1175,6 +1238,7 @@
 
   updateTimeRangeControls();
   renderConfig();
+  loadDeployments();
   setEventTab('current');
   setDerived();
   updateSummary();
