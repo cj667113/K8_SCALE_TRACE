@@ -556,11 +556,7 @@
         <div class="graph-wrap">
           <div class="graph-card">
             <canvas id="scaleChart"></canvas>
-            <div class="legend">
-              <span class="nodes">Worker nodes ready</span>
-              <span class="pods">Pods ready</span>
-              <span class="all-nodes">All nodes ready</span>
-            </div>
+            <div class="legend" id="chartLegend"></div>
           </div>
           <div class="graph-actions">
             <label class="pill" for="timeRange">Time range</label>
@@ -608,6 +604,30 @@
   const summaryStarted = document.getElementById('summaryStarted');
   const summaryFinished = document.getElementById('summaryFinished');
   const timelineList = document.getElementById('timelineList');
+
+  const chartLegend = document.getElementById('chartLegend');
+
+  function renderLegend(showAllNodes) {
+    if (!chartLegend) return;
+    chartLegend.innerHTML = '';
+    const nodesSpan = document.createElement('span');
+    nodesSpan.className = 'nodes';
+    nodesSpan.textContent = 'Worker nodes ready';
+    chartLegend.appendChild(nodesSpan);
+
+    if (showAllNodes) {
+      const allSpan = document.createElement('span');
+      allSpan.className = 'all-nodes';
+      allSpan.textContent = 'All nodes ready';
+      chartLegend.appendChild(allSpan);
+    }
+
+    const podsSpan = document.createElement('span');
+    podsSpan.className = 'pods';
+    podsSpan.textContent = 'Pods ready';
+    chartLegend.appendChild(podsSpan);
+  }
+
   const chartCanvas = document.getElementById('scaleChart');
   const exportChart = document.getElementById('exportChart');
   const refreshChart = document.getElementById('refreshChart');
@@ -993,9 +1013,12 @@
       updateSummary();
     }
 
-    const nodeReadyIncrease = message.match(/Worker nodes Ready increased to (\d+) in ([\d.]+)s/);
+    const nodeReadyIncrease = message.match(/Worker nodes Ready (increased|changed) to (\d+) in ([\d.]+)s/);
     if (nodeReadyIncrease) {
-      appendEventRow('Nodes ready inc', scheduledAt, nodeReadyIncrease[2] + 's', 'Ready nodes: ' + nodeReadyIncrease[1], new Date(ts).toISOString(), { readyNodes: parseInt(nodeReadyIncrease[1], 10), elapsedSec: parseFloat(nodeReadyIncrease[2]) }, Number.isFinite(ts) ? ts : null);
+      const action = nodeReadyIncrease[1];
+      const readyCount = parseInt(nodeReadyIncrease[2], 10);
+      const elapsedSec = parseFloat(nodeReadyIncrease[3]);
+      appendEventRow('Nodes ready', scheduledAt, elapsedSec + 's', 'Ready nodes: ' + readyCount + ' (' + action + ')', new Date(ts).toISOString(), { readyNodes: readyCount, action, elapsedSec }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -1042,6 +1065,7 @@
       ctx.fillStyle = '#a5a29f';
       ctx.font = '14px "Avenir Next", sans-serif';
       ctx.fillText('Waiting for status samples to draw the chart...', 16, 28);
+      renderLegend(false);
       return;
     }
 
@@ -1078,11 +1102,15 @@
       ctx.fillStyle = '#a5a29f';
       ctx.font = '14px "Avenir Next", sans-serif';
       ctx.fillText('Waiting for status samples to draw the chart...', 16, 28);
+      renderLegend(false);
       return;
     }
 
     if (windowSamples.length === 1) {
       const single = windowSamples[0];
+      const showAllNodes = single.allNodesReady !== undefined
+        && single.allNodesReady !== null
+        && single.allNodesReady !== single.nodesReady;
       const padding = { left: 92, right: 18, top: 18, bottom: 44 };
       const chartW = width - padding.left - padding.right;
       const chartH = height - padding.top - padding.bottom;
@@ -1117,6 +1145,7 @@
       ctx.arc(x, yPods, 4, 0, Math.PI * 2);
       ctx.fill();
 
+      renderLegend(showAllNodes);
       return;
     }
 
@@ -1201,12 +1230,14 @@
     }
 
     drawLine('#0f6d5b', 'nodesReady');
-    if (windowSamples.some((s) => s.allNodesReady !== undefined && s.allNodesReady !== null && s.allNodesReady !== s.nodesReady)) {
+    const showAllNodes = windowSamples.some((s) => s.allNodesReady !== undefined && s.allNodesReady !== null && s.allNodesReady !== s.nodesReady);
+    if (showAllNodes) {
       ctx.setLineDash([6, 4]);
       drawLine('#1f7dcf', 'allNodesReady');
       ctx.setLineDash([]);
     }
     drawLine('#e36d2f', 'podsReady');
+    renderLegend(showAllNodes);
   }
 
   async function startScale() {

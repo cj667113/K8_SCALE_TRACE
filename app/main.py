@@ -113,23 +113,82 @@ def _event_time_to_epoch(event_time):
         return None
 
 
+def _event_source_name(ev) -> str:
+    source = getattr(ev, "source", None)
+    if source and getattr(source, "component", None):
+        return str(source.component)
+    reporting = getattr(ev, "reporting_controller", None)
+    if reporting:
+        return str(reporting)
+    return ""
+
+
+def _event_involved_name(ev) -> str:
+    involved = getattr(ev, "involved_object", None)
+    if involved and getattr(involved, "name", None):
+        return str(involved.name)
+    regarding = getattr(ev, "regarding", None)
+    if regarding and getattr(regarding, "name", None):
+        return str(regarding.name)
+    return ""
+
+
+def _event_timestamp(ev):
+    for field in ("event_time", "last_timestamp", "first_timestamp"):
+        value = getattr(ev, field, None)
+        if value:
+            return value
+    return None
+
+
+def _event_message(ev) -> str:
+    message = getattr(ev, "message", None)
+    if message:
+        return str(message)
+    note = getattr(ev, "note", None)
+    if note:
+        return str(note)
+    return ""
+
+
 def find_autoscaler_trigger_time(since_epoch: float) -> float | None:
     if not getattr(app.state, "k8s_enabled", False):
         return None
-    core: client.CoreV1Api = app.state.core
+
+    trigger_reasons = {
+        "TriggeredScaleUp",
+        "ScaleUp",
+        "TriggeredScaleUpLimit",
+        "ScaleUpAttempt",
+        "ScaleUpNotNeeded",
+    }
+    candidates = []
+
     try:
-        events = core.list_namespaced_event(namespace="kube-system").items
+        core: client.CoreV1Api = app.state.core
+        candidates.extend(core.list_namespaced_event(namespace="kube-system").items)
     except Exception:
-        return None
-    trigger_reasons = {"TriggeredScaleUp", "ScaleUp", "TriggeredScaleUpLimit"}
+        pass
+
+    try:
+        events_api = client.EventsV1Api()
+        candidates.extend(events_api.list_namespaced_event(namespace="kube-system").items)
+    except Exception:
+        pass
+
     earliest = None
-    for ev in events:
-        involved = ev.involved_object
-        if involved and involved.name != "cluster-autoscaler":
+    for ev in candidates:
+        reason = getattr(ev, "reason", None) or ""
+        message = _event_message(ev).lower()
+        reason_lower = str(reason).lower()
+        if reason and reason not in trigger_reasons:
+            if not any(token in reason_lower for token in ("scaleup", "scale-up", "scale up", "scale")) and "scale" not in message:
+                continue
+        source_name = _event_source_name(ev).lower()
+        involved_name = _event_involved_name(ev).lower()
+        if "cluster-autoscaler" not in source_name and "cluster-autoscaler" not in involved_name:
             continue
-        if ev.reason and ev.reason not in trigger_reasons:
-            continue
-        ts = ev.event_time or ev.last_timestamp or ev.first_timestamp
+        ts = _event_timestamp(ev)
         epoch = _event_time_to_epoch(ts)
         if epoch is None or epoch < since_epoch:
             continue
@@ -271,6 +330,7 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
     t_node_obj: Optional[float] = None
     t_nodes_ready: Optional[float] = None
     t_pods_ready: Optional[float] = None
+    last_ready_logged = start_ready
     logged_autoscaler = False
     logged_node_obj = False
     logged_provision = False
@@ -299,7 +359,7 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             desired, ready_pods = desired_pods, 0
 
         if t_autoscaler is None:
-            trigger_epoch = find_autoscaler_trigger_time(start_epoch)
+            trigger_epoch = find_autoscaler_trigger_time(start_epoch - 60)
             if trigger_epoch is not None:
                 t_autoscaler = trigger_epoch
         if t_autoscaler is not None and not logged_autoscaler:
@@ -329,9 +389,14 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             logged_provision = True
             log(job, f"Node provisioning time (start->node object): {t_node_obj - start_epoch:.1f}s.")
 
+        if ready != last_ready_logged:
+            if ready > last_ready_logged:
+                log(job, f"Worker nodes Ready increased to {ready} in {now - start:.1f}s.")
+            else:
+                log(job, f"Worker nodes Ready changed to {ready} in {now - start:.1f}s.")
+            last_ready_logged = ready
         if t_nodes_ready is None and ready > start_ready:
             t_nodes_ready = now
-            log(job, f"Worker nodes Ready increased to {ready} in {now - start:.1f}s.")
 
         if t_pods_ready is None and desired == desired_pods and ready_pods == desired_pods:
             t_pods_ready = now

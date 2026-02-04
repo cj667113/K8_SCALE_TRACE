@@ -12,6 +12,9 @@ rules:
   - apiGroups: [""]
     resources: ["nodes", "pods", "events"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "deployments/scale"]
     verbs: ["get", "list", "watch", "patch", "update"]
@@ -53,7 +56,7 @@ spec:
             - name: TARGET_NAMESPACE
               value: "default"
             - name: TARGET_DEPLOYMENT
-              value: "sample-app"
+              value: "scaleout-ui"
             - name: MAX_PODS_PER_NODE
               value: "20"
             - name: NODE_SELECTOR
