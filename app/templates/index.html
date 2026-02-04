@@ -1017,7 +1017,7 @@
 
     if (windowSamples.length === 1) {
       const single = windowSamples[0];
-      const padding = { left: 72, right: 18, top: 18, bottom: 44 };
+      const padding = { left: 92, right: 18, top: 18, bottom: 44 };
       const chartW = width - padding.left - padding.right;
       const chartH = height - padding.top - padding.bottom;
       const maxValue = Math.max(single.podsReady, single.nodesReady, 1);
@@ -1072,7 +1072,7 @@
 
     const maxValue = niceMax(maxValueRaw);
 
-    const padding = { left: 72, right: 18, top: 18, bottom: 44 };
+    const padding = { left: 92, right: 18, top: 18, bottom: 44 };
     const chartW = width - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
@@ -1092,7 +1092,7 @@
     for (let i = 0; i <= yTicks; i++) {
       const value = Math.round((maxValue / yTicks) * (yTicks - i));
       const y = padding.top + (chartH / yTicks) * i + 4;
-      ctx.fillText(String(value), 10, y);
+      ctx.fillText(String(value), 28, y);
     }
 
     const xTicks = 5;
@@ -1112,7 +1112,7 @@
     ctx.fillStyle = '#6c625a';
     ctx.font = '12px "Avenir Next", sans-serif';
     ctx.fillText('Time (s)', padding.left + chartW / 2 - 20, height - 4);
-    ctx.translate(22, padding.top + chartH / 2 + 24);
+    ctx.translate(8, padding.top + chartH / 2 + 24);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText('Ready count', 0, 0);
     ctx.restore();
