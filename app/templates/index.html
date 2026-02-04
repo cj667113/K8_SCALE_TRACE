@@ -939,6 +939,11 @@
     drawChart();
   }
 
+  function elapsedSinceStart(ts) {
+    if (!Number.isFinite(ts) || !state.startTimeMs) return null;
+    return (ts - state.startTimeMs) / 1000;
+  }
+
   function parseLogLine(line) {
     const parts = line.split(' | ');
     if (parts.length < 2) return;
@@ -963,7 +968,8 @@
         state.desiredPods = parseInt(match[1], 10);
       }
       scaleHint.textContent = 'Scale job started at ' + formatTime(state.startTimeMs) + '.';
-      appendEventRow('Scale request', scheduledAt, '—', 'Pods=' + state.desiredPods, new Date(ts).toISOString(), { pods: state.desiredPods, expectedNodes: state.expectedNodes }, Number.isFinite(ts) ? ts : null);
+      const elapsed = elapsedSinceStart(Number.isFinite(ts) ? ts : state.startTimeMs) ?? 0;
+      appendEventRow('Scale request', scheduledAt, elapsed.toFixed(1) + 's', 'Pods=' + state.desiredPods, new Date(ts).toISOString(), { pods: state.desiredPods, expectedNodes: state.expectedNodes, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -997,19 +1003,25 @@
 
     const autoscalerMatch = message.match(/Autoscaler triggered scale-up at (.+) UTC/);
     if (autoscalerMatch) {
-      appendEventRow('Autoscaler trigger', scheduledAt, '—', 'Scale-up triggered', new Date(ts).toISOString(), { triggerTime: autoscalerMatch[1] }, Number.isFinite(ts) ? ts : null);
+      const elapsed = elapsedSinceStart(ts);
+      const duration = elapsed !== null ? elapsed.toFixed(1) + 's' : '—';
+      appendEventRow('Autoscaler trigger', scheduledAt, duration, 'Scale-up triggered', new Date(ts).toISOString(), { triggerTime: autoscalerMatch[1], elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
     const nodeObjMatch = message.match(/First new node object at (.+) UTC/);
     if (nodeObjMatch) {
-      appendEventRow('Node object', scheduledAt, '—', 'First new node object', new Date(ts).toISOString(), { nodeObjectTime: nodeObjMatch[1] }, Number.isFinite(ts) ? ts : null);
+      const elapsed = elapsedSinceStart(ts);
+      const duration = elapsed !== null ? elapsed.toFixed(1) + 's' : '—';
+      appendEventRow('Node object', scheduledAt, duration, 'First new node object', new Date(ts).toISOString(), { nodeObjectTime: nodeObjMatch[1], elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
     const provisionStartMatch = message.match(/Node provisioning started \((.+)\)\./);
     if (provisionStartMatch) {
-      appendEventRow('Provision start', scheduledAt, '—', provisionStartMatch[1], new Date(ts).toISOString(), { source: provisionStartMatch[1] }, Number.isFinite(ts) ? ts : null);
+      const elapsed = elapsedSinceStart(ts);
+      const duration = elapsed !== null ? elapsed.toFixed(1) + 's' : '—';
+      appendEventRow('Provision start', scheduledAt, duration, provisionStartMatch[1], new Date(ts).toISOString(), { source: provisionStartMatch[1], elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
