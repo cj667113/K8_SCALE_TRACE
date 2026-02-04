@@ -948,6 +948,9 @@
     const parts = line.split(' | ');
     if (parts.length < 2) return;
     const ts = Date.parse(parts[0]);
+    if (Number.isFinite(ts) && !state.startTimeMs) {
+      state.startTimeMs = ts;
+    }
     const message = parts.slice(1).join(' | ');
     const scheduledAt = Number.isFinite(ts) ? formatTime(ts) : '—';
 
