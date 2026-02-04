@@ -723,8 +723,24 @@
 
   async function loadDeployments() {
     if (!targetSelect) return;
+    const current = CONFIG.targetNamespace + '/' + CONFIG.targetDeployment;
+    const fallbackOption = () => {
+      targetSelect.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = current;
+      opt.textContent = current;
+      targetSelect.appendChild(opt);
+      targetSelect.value = current;
+      syncTargetReplicas(CONFIG.targetNamespace, CONFIG.targetDeployment);
+    };
+
     try {
       const res = await fetch('/api/deployments');
+      if (!res.ok) {
+        targetHint.textContent = 'Failed to load deployments.';
+        fallbackOption();
+        return;
+      }
       const data = await res.json();
       targetSelect.innerHTML = '';
       const items = data.items || [];
@@ -734,21 +750,27 @@
         opt.textContent = item.namespace + '/' + item.name;
         targetSelect.appendChild(opt);
       });
-      const current = CONFIG.targetNamespace + '/' + CONFIG.targetDeployment;
       const match = items.find((i) => i.namespace + '/' + i.name === current);
       if (match) {
         targetSelect.value = current;
       } else if (items.length) {
-        targetSelect.value = current;
+        targetSelect.value = items[0].namespace + '/' + items[0].name;
       }
       if (targetSelect.value) {
-        updateTarget(targetSelect.value);
+        const parts = targetSelect.value.split('/');
+        if (parts.length === 2) {
+          CONFIG.targetNamespace = parts[0];
+          CONFIG.targetDeployment = parts[1];
+        }
+        renderConfig();
+        syncTargetReplicas(CONFIG.targetNamespace, CONFIG.targetDeployment);
       }
       if (!items.length) {
         targetHint.textContent = 'No deployments found (K8s disabled).';
       }
     } catch (err) {
       targetHint.textContent = 'Failed to load deployments.';
+      fallbackOption();
     }
   }
 
