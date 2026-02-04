@@ -262,6 +262,7 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
     nodes_start = list_worker_nodes()
     start_total, start_ready = count_nodes(nodes_start)
     all_total, all_ready = count_all_nodes()
+    seen_nodes = {node.metadata.name for node in nodes_start if node.metadata and node.metadata.name}
 
     log(job, f"Current worker nodes: {start_total} (ready {start_ready}); all nodes: {all_total} (ready {all_ready}).")
     log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {desired_pods} replicas.")
