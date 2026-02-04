@@ -284,6 +284,13 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
 
         nodes = list_worker_nodes()
         total, ready = count_nodes(nodes)
+        for node in nodes:
+            name = node.metadata.name if node.metadata else None
+            created = node.metadata.creation_timestamp if node.metadata else None
+            if name and name not in seen_nodes:
+                seen_nodes.add(name)
+                ts = created.strftime("%H:%M:%S") + " UTC" if created else "unknown"
+                log(job, f"New node object detected: {name} at {ts}.")
         try:
             desired, ready_pods = read_deployment_ready(*get_target())
         except ApiException as exc:

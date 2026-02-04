@@ -950,27 +950,52 @@
 
     const statusMatch = message.match(/Status: nodes (\d+) \(ready (\d+)\)(?:; all nodes: (\d+) \(ready (\d+)\))? \| pods ready (\d+)\/(\d+)/);
     if (statusMatch) {
+      const nodesTotal = parseInt(statusMatch[1], 10);
       const nodesReady = parseInt(statusMatch[2], 10);
-            const allNodes = statusMatch[3] ? parseInt(statusMatch[3], 10) : null;
+      const allTotal = statusMatch[3] ? parseInt(statusMatch[3], 10) : null;
       const allReady = statusMatch[4] ? parseInt(statusMatch[4], 10) : null;
       const podsReady = parseInt(statusMatch[5], 10);
       const desiredPods = parseInt(statusMatch[6], 10);
-      state.expectedNodes = nodesReady;
-      state.allNodes = allNodes;
+      state.expectedNodes = nodesTotal;
+      state.allNodes = allTotal;
       state.desiredPods = desiredPods;
-      recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, nodesReady, desiredPods, allNodes, allReady);
+      recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, nodesTotal, desiredPods, allTotal, allReady);
       const elapsed = state.startTimeMs ? ((Number.isFinite(ts) ? ts : Date.now()) - state.startTimeMs) / 1000 : null;
-      const statusKey = nodesReady + ':' + (allNodes || 0) + ':' + podsReady + ':' + desiredPods;
+      const statusKey = nodesTotal + ':' + (allTotal || 0) + ':' + podsReady + ':' + desiredPods;
       if (state.lastStatusKey !== statusKey) {
         state.lastStatusKey = statusKey;
-        appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + (allNodes !== null ? (', all nodes ' + allNodes) : '') + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, allNodes, allReady, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
+        appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + ' / total ' + nodesTotal + (allTotal !== null ? (', all nodes ' + allTotal) : '') + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesTotal, nodesReady, allTotal, allReady, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       }
     }
 
-    const provisionMatch = message.match(/Node provisioning time: ([\d.]+)s/);
+    const autoscalerMatch = message.match(/Autoscaler triggered scale-up at (.+) UTC/);
+    if (autoscalerMatch) {
+      appendEventRow('Autoscaler trigger', scheduledAt, '—', 'Scale-up triggered', new Date(ts).toISOString(), { triggerTime: autoscalerMatch[1] }, Number.isFinite(ts) ? ts : null);
+      updateSummary();
+    }
+
+    const nodeObjMatch = message.match(/First new node object at (.+) UTC/);
+    if (nodeObjMatch) {
+      appendEventRow('Node object', scheduledAt, '—', 'First new node object', new Date(ts).toISOString(), { nodeObjectTime: nodeObjMatch[1] }, Number.isFinite(ts) ? ts : null);
+      updateSummary();
+    }
+
+    const provisionStartMatch = message.match(/Node provisioning started \((.+)\)\./);
+    if (provisionStartMatch) {
+      appendEventRow('Provision start', scheduledAt, '—', provisionStartMatch[1], new Date(ts).toISOString(), { source: provisionStartMatch[1] }, Number.isFinite(ts) ? ts : null);
+      updateSummary();
+    }
+
+    const provisionMatch = message.match(/Node provisioning time.*?: ([\d.]+)s/);
     if (provisionMatch) {
       state.milestones.nodeProvision = parseFloat(provisionMatch[1]);
       appendEventRow('Node provision', scheduledAt, formatDuration(state.milestones.nodeProvision), 'Node objects seen', new Date(ts).toISOString(), { nodeProvisionSec: state.milestones.nodeProvision }, Number.isFinite(ts) ? ts : null);
+      updateSummary();
+    }
+
+    const nodeReadyIncrease = message.match(/Worker nodes Ready increased to (\d+) in ([\d.]+)s/);
+    if (nodeReadyIncrease) {
+      appendEventRow('Nodes ready inc', scheduledAt, nodeReadyIncrease[2] + 's', 'Ready nodes: ' + nodeReadyIncrease[1], new Date(ts).toISOString(), { readyNodes: parseInt(nodeReadyIncrease[1], 10), elapsedSec: parseFloat(nodeReadyIncrease[2]) }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -1176,7 +1201,7 @@
     }
 
     drawLine('#0f6d5b', 'nodesReady');
-    if (windowSamples.some((s) => s.allNodesReady !== undefined && s.allNodesReady !== null)) {
+    if (windowSamples.some((s) => s.allNodesReady !== undefined && s.allNodesReady !== null && s.allNodesReady !== s.nodesReady)) {
       ctx.setLineDash([6, 4]);
       drawLine('#1f7dcf', 'allNodesReady');
       ctx.setLineDash([]);
