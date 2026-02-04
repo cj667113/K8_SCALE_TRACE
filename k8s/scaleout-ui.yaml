@@ -48,7 +48,7 @@ spec:
       containers:
         - name: scaleout-ui
           image: your-registry/scaleout-ui:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: TARGET_NAMESPACE
               value: "default"
