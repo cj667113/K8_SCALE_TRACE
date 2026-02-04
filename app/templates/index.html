@@ -1136,7 +1136,11 @@
       const response = await fetch('/api/scale', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pods })
+        body: JSON.stringify({
+          pods,
+          namespace: CONFIG.targetNamespace,
+          deployment: CONFIG.targetDeployment
+        })
       });
       if (!response.ok) {
         const err = await response.json();

@@ -32,6 +32,8 @@ app = FastAPI(title=APP_TITLE)
 
 class ScaleRequest(BaseModel):
     pods: conint(ge=0, le=200000) = Field(..., description="Desired pod replica count")
+    namespace: str | None = None
+    deployment: str | None = None
 
 
 class TargetRequest(BaseModel):
@@ -358,6 +360,8 @@ def set_target_endpoint(req: TargetRequest) -> JSONResponse:
     return JSONResponse({"targetNamespace": req.namespace, "targetDeployment": req.deployment})
 @app.post("/api/scale")
 def scale(req: ScaleRequest) -> JSONResponse:
+    if req.namespace and req.deployment:
+        set_target(req.namespace, req.deployment)
     desired_pods = req.pods
     expected_nodes = math.ceil(desired_pods / MAX_PODS_PER_NODE) if MAX_PODS_PER_NODE > 0 else 0
 
