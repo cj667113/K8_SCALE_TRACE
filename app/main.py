@@ -150,6 +150,23 @@ def find_first_new_node_time(start_epoch: float) -> float | None:
             earliest = epoch
     return earliest
 
+
+
+def count_all_nodes() -> tuple[int, int]:
+    if not getattr(app.state, "k8s_enabled", False):
+        return 0, 0
+    core: client.CoreV1Api = app.state.core
+    nodes = core.list_node().items
+    total = len(nodes)
+    ready = 0
+    for node in nodes:
+        conditions = node.status.conditions or []
+        for condition in conditions:
+            if condition.type == "Ready" and condition.status == "True":
+                ready += 1
+                break
+    return total, ready
+
 def list_worker_nodes() -> List[client.V1Node]:
     if not getattr(app.state, "k8s_enabled", False):
         return []
@@ -244,8 +261,9 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
     start_epoch = time.time()
     nodes_start = list_worker_nodes()
     start_total, start_ready = count_nodes(nodes_start)
+    all_total, all_ready = count_all_nodes()
 
-    log(job, f"Current worker nodes: {start_total} (ready {start_ready}).")
+    log(job, f"Current worker nodes: {start_total} (ready {start_ready}); all nodes: {all_total} (ready {all_ready}).")
     log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {desired_pods} replicas.")
 
     t_autoscaler: Optional[float] = None
