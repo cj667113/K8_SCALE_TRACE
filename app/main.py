@@ -330,7 +330,8 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             log(job, f"Pods Ready reached {desired_pods} in {now - start:.1f}s.")
 
         if now - last_status >= STATUS_INTERVAL:
-            log(job, f"Status: nodes {total} (ready {ready}) | pods ready {ready_pods}/{desired_pods}.")
+            all_total, all_ready = count_all_nodes()
+            log(job, f"Status: nodes {total} (ready {ready}); all nodes: {all_total} (ready {all_ready}) | pods ready {ready_pods}/{desired_pods}.")
             last_status = now
 
         if t_pods_ready:

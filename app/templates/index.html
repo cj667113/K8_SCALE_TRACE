@@ -387,6 +387,7 @@
     }
 
     .legend .pods { color: var(--accent-2); }
+    .legend .all-nodes { color: var(--accent-3); }
     .legend .nodes { color: var(--accent); }
 
     .graph-actions {
@@ -513,8 +514,12 @@
             <div id="summaryDesiredPods" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Nodes in Pool</div>
+            <div class="summary-label">Worker Nodes</div>
             <div id="summaryExpectedNodes" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">All Nodes</div>
+            <div id="summaryAllNodes" class="summary-value">—</div>
           </div>
           <div class="summary-card">
             <div class="summary-label">Pod Ready Time</div>
@@ -554,6 +559,7 @@
             <div class="legend">
               <span class="nodes">Worker nodes ready</span>
               <span class="pods">Pods ready</span>
+              <span class="all-nodes">All nodes ready</span>
             </div>
           </div>
           <div class="graph-actions">
@@ -594,6 +600,7 @@
   const panels = Array.from(document.querySelectorAll('.tab-panel'));
   const summaryDesiredPods = document.getElementById('summaryDesiredPods');
   const summaryExpectedNodes = document.getElementById('summaryExpectedNodes');
+  const summaryAllNodes = document.getElementById('summaryAllNodes');
   const summaryPodsReady = document.getElementById('summaryPodsReady');
   const summaryNodesReady = document.getElementById('summaryNodesReady');
   const summaryNodesProvision = document.getElementById('summaryNodesProvision');
@@ -645,6 +652,7 @@
     startTimeMs: null,
     endTimeMs: null,
     expectedNodes: null,
+    allNodes: null,
     desiredPods: null,
     statusSamples: [],
     seenScaleRequest: false,
@@ -888,7 +896,7 @@
     updateTimeline();
   }
 
-  function recordStatusSample(ts, nodesReady, podsReady, expectedNodes, desiredPods) {
+  function recordStatusSample(ts, nodesReady, podsReady, expectedNodes, desiredPods, allNodes, allReady) {
     if (!state.startTimeMs) {
       state.startTimeMs = ts;
     }
@@ -898,6 +906,8 @@
       podsReady,
       expectedNodes,
       desiredPods,
+      allNodes,
+      allReady,
     });
     drawChart();
   }
@@ -938,19 +948,22 @@
       }
     }
 
-    const statusMatch = message.match(/Status: nodes (\d+) \(ready (\d+)\) \| pods ready (\d+)\/(\d+)/);
+    const statusMatch = message.match(/Status: nodes (\d+) \(ready (\d+)\)(?:; all nodes: (\d+) \(ready (\d+)\))? \| pods ready (\d+)\/(\d+)/);
     if (statusMatch) {
       const nodesReady = parseInt(statusMatch[2], 10);
-            const podsReady = parseInt(statusMatch[3], 10);
-      const desiredPods = parseInt(statusMatch[4], 10);
+            const allNodes = statusMatch[3] ? parseInt(statusMatch[3], 10) : null;
+      const allReady = statusMatch[4] ? parseInt(statusMatch[4], 10) : null;
+      const podsReady = parseInt(statusMatch[5], 10);
+      const desiredPods = parseInt(statusMatch[6], 10);
       state.expectedNodes = nodesReady;
+      state.allNodes = allNodes;
       state.desiredPods = desiredPods;
-      recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, nodesReady, desiredPods);
+      recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, nodesReady, desiredPods, allNodes, allReady);
       const elapsed = state.startTimeMs ? ((Number.isFinite(ts) ? ts : Date.now()) - state.startTimeMs) / 1000 : null;
-      const statusKey = nodesReady + ':' + podsReady + ':' + desiredPods;
+      const statusKey = nodesReady + ':' + (allNodes || 0) + ':' + podsReady + ':' + desiredPods;
       if (state.lastStatusKey !== statusKey) {
         state.lastStatusKey = statusKey;
-        appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
+        appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + (allNodes !== null ? (', all nodes ' + allNodes) : '') + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, allNodes, allReady, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       }
     }
 
@@ -1012,6 +1025,7 @@
       t: (sample.t - start) / 1000,
       nodesReady: sample.nodesReady,
       podsReady: sample.podsReady,
+      allNodesReady: sample.allReady,
     }));
 
     const maxTime = Math.max(...samples.map((s) => s.t), 1);
@@ -1084,7 +1098,8 @@
     const maxValueRaw = Math.max(
       1,
       ...windowSamples.map((s) => s.podsReady),
-      ...windowSamples.map((s) => s.nodesReady)
+      ...windowSamples.map((s) => s.nodesReady),
+      ...windowSamples.map((s) => s.allNodesReady || 0)
     );
 
     function niceMax(value) {
@@ -1161,6 +1176,11 @@
     }
 
     drawLine('#0f6d5b', 'nodesReady');
+    if (windowSamples.some((s) => s.allNodesReady !== undefined && s.allNodesReady !== null)) {
+      ctx.setLineDash([6, 4]);
+      drawLine('#1f7dcf', 'allNodesReady');
+      ctx.setLineDash([]);
+    }
     drawLine('#e36d2f', 'podsReady');
   }
 
