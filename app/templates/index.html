@@ -646,19 +646,47 @@
   let currentRunRows = [];
   let activeEventTab = 'current';
 
+  let eventSeq = 0;
+
+  function compareEventRows(a, b) {
+    const epochA = parseInt(a.dataset.epoch || '', 10);
+    const epochB = parseInt(b.dataset.epoch || '', 10);
+    if (Number.isFinite(epochA) && Number.isFinite(epochB) && epochA !== epochB) {
+      return epochA - epochB;
+    }
+    const elapsedA = parseFloat(a.dataset.elapsed || '');
+    const elapsedB = parseFloat(b.dataset.elapsed || '');
+    if (Number.isFinite(elapsedA) && Number.isFinite(elapsedB) && elapsedA !== elapsedB) {
+      return elapsedA - elapsedB;
+    }
+    const seqA = parseInt(a.dataset.seq || '', 10);
+    const seqB = parseInt(b.dataset.seq || '', 10);
+    return (Number.isFinite(seqA) ? seqA : 0) - (Number.isFinite(seqB) ? seqB : 0);
+  }
+
+  function insertEventRowSorted(row) {
+    currentRunRows = currentRunRows.concat([row]).sort(compareEventRows);
+    if (!eventsTable || activeEventTab !== 'current') return;
+    eventsTable.innerHTML = '';
+    currentRunRows.forEach((r) => eventsTable.appendChild(r.cloneNode(true)));
+  }
+
   function renderEventsTable() {
     if (!eventsTable) return;
     eventsTable.innerHTML = '';
     const rows = activeEventTab === 'history'
       ? eventHistory.flatMap((run) => run.rows)
       : currentRunRows;
-    rows.forEach((row) => eventsTable.appendChild(row.cloneNode(true)));
+    rows
+      .slice()
+      .sort(compareEventRows)
+      .forEach((row) => eventsTable.appendChild(row.cloneNode(true)));
   }
 
   function appendEventToTable(row) {
     if (!eventsTable) return;
     if (activeEventTab !== 'current') return;
-    eventsTable.appendChild(row.cloneNode(true));
+    insertEventRowSorted(row);
   }
 
   function setEventTab(tab) {
@@ -893,14 +921,17 @@
     }
     if (data && typeof data === 'object') {
       row.dataset.payload = JSON.stringify(data);
+      if (data.elapsedSec !== undefined && data.elapsedSec !== null && !Number.isNaN(data.elapsedSec)) {
+        row.dataset.elapsed = String(data.elapsedSec);
+      }
     }
+    row.dataset.seq = String(++eventSeq);
     const cols = [event, scheduledAt, duration, details];
     cols.forEach((value) => {
       const td = document.createElement('td');
       td.textContent = value;
       row.appendChild(td);
     });
-    currentRunRows.push(row);
     appendEventToTable(row);
   }
 
@@ -948,9 +979,6 @@
     const parts = line.split(' | ');
     if (parts.length < 2) return;
     const ts = Date.parse(parts[0]);
-    if (Number.isFinite(ts) && !state.startTimeMs) {
-      state.startTimeMs = ts;
-    }
     const message = parts.slice(1).join(' | ');
     const scheduledAt = Number.isFinite(ts) ? formatTime(ts) : '—';
 
@@ -971,7 +999,7 @@
         state.desiredPods = parseInt(match[1], 10);
       }
       scaleHint.textContent = 'Scale job started at ' + formatTime(state.startTimeMs) + '.';
-      const elapsed = elapsedSinceStart(Number.isFinite(ts) ? ts : state.startTimeMs) ?? 0;
+      const elapsed = 0;
       appendEventRow('Scale request', scheduledAt, elapsed.toFixed(1) + 's', 'Pods=' + state.desiredPods, new Date(ts).toISOString(), { pods: state.desiredPods, expectedNodes: state.expectedNodes, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
@@ -1031,7 +1059,7 @@
     const provisionMatch = message.match(/Node provisioning time.*?: ([\d.]+)s/);
     if (provisionMatch) {
       state.milestones.nodeProvision = parseFloat(provisionMatch[1]);
-      appendEventRow('Node provision', scheduledAt, formatDuration(state.milestones.nodeProvision), 'Node objects seen', new Date(ts).toISOString(), { nodeProvisionSec: state.milestones.nodeProvision }, Number.isFinite(ts) ? ts : null);
+      appendEventRow('Node provision', scheduledAt, formatDuration(state.milestones.nodeProvision), 'Node objects seen', new Date(ts).toISOString(), { nodeProvisionSec: state.milestones.nodeProvision, elapsedSec: state.milestones.nodeProvision }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -1047,7 +1075,7 @@
     const nodeReadyMatch = message.match(/Node ready time: ([\d.]+)s/);
     if (nodeReadyMatch) {
       state.milestones.nodeReady = parseFloat(nodeReadyMatch[1]);
-      appendEventRow('Node ready', scheduledAt, formatDuration(state.milestones.nodeReady), 'Worker nodes ready', new Date(ts).toISOString(), { nodeReadySec: state.milestones.nodeReady }, Number.isFinite(ts) ? ts : null);
+      appendEventRow('Node ready', scheduledAt, formatDuration(state.milestones.nodeReady), 'Worker nodes ready', new Date(ts).toISOString(), { nodeReadySec: state.milestones.nodeReady, elapsedSec: state.milestones.nodeReady }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -1055,7 +1083,7 @@
     if (podReadyMatch) {
       state.milestones.podReady = parseFloat(podReadyMatch[1]);
       state.endTimeMs = state.startTimeMs ? state.startTimeMs + state.milestones.podReady * 1000 : Date.now();
-      appendEventRow('Pods ready', scheduledAt, formatDuration(state.milestones.podReady), 'Pods reached Ready', new Date(ts).toISOString(), { podsReadySec: state.milestones.podReady, pods: state.desiredPods }, Number.isFinite(ts) ? ts : null);
+      appendEventRow('Pods ready', scheduledAt, formatDuration(state.milestones.podReady), 'Pods reached Ready', new Date(ts).toISOString(), { podsReadySec: state.milestones.podReady, pods: state.desiredPods, elapsedSec: state.milestones.podReady }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
   }
