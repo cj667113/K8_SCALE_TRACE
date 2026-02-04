@@ -102,6 +102,54 @@ def set_target(namespace: str, deployment: str) -> None:
     app.state.target_namespace = namespace
     app.state.target_deployment = deployment
 
+
+
+def _event_time_to_epoch(event_time):
+    if event_time is None:
+        return None
+    try:
+        return event_time.timestamp()
+    except Exception:
+        return None
+
+
+def find_autoscaler_trigger_time(since_epoch: float) -> float | None:
+    if not getattr(app.state, "k8s_enabled", False):
+        return None
+    core: client.CoreV1Api = app.state.core
+    try:
+        events = core.list_namespaced_event(namespace="kube-system").items
+    except Exception:
+        return None
+    trigger_reasons = {"TriggeredScaleUp", "ScaleUp", "TriggeredScaleUpLimit"}
+    earliest = None
+    for ev in events:
+        involved = ev.involved_object
+        if involved and involved.name != "cluster-autoscaler":
+            continue
+        if ev.reason and ev.reason not in trigger_reasons:
+            continue
+        ts = ev.event_time or ev.last_timestamp or ev.first_timestamp
+        epoch = _event_time_to_epoch(ts)
+        if epoch is None or epoch < since_epoch:
+            continue
+        if earliest is None or epoch < earliest:
+            earliest = epoch
+    return earliest
+
+
+def find_first_new_node_time(start_epoch: float) -> float | None:
+    nodes = list_worker_nodes()
+    earliest = None
+    for node in nodes:
+        created = node.metadata.creation_timestamp
+        epoch = _event_time_to_epoch(created)
+        if epoch is None or epoch < start_epoch:
+            continue
+        if earliest is None or epoch < earliest:
+            earliest = epoch
+    return earliest
+
 def list_worker_nodes() -> List[client.V1Node]:
     if not getattr(app.state, "k8s_enabled", False):
         return []
@@ -193,15 +241,21 @@ def simulate_scale_job(job: ScaleJob) -> None:
 
 def poll_until(job: ScaleJob, desired_pods: int) -> None:
     start = time.monotonic()
+    start_epoch = time.time()
     nodes_start = list_worker_nodes()
     start_total, start_ready = count_nodes(nodes_start)
 
     log(job, f"Current worker nodes: {start_total} (ready {start_ready}).")
     log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {desired_pods} replicas.")
 
-    t_nodes_seen: Optional[float] = None
+    t_autoscaler: Optional[float] = None
+    t_node_obj: Optional[float] = None
     t_nodes_ready: Optional[float] = None
     t_pods_ready: Optional[float] = None
+    logged_autoscaler = False
+    logged_node_obj = False
+    logged_provision = False
+    logged_provision_start = False
 
     last_status = 0.0
     while True:
@@ -218,9 +272,36 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             log(job, f"Failed to read deployment status: {exc}")
             desired, ready_pods = desired_pods, 0
 
-        if t_nodes_seen is None and total > start_total:
-            t_nodes_seen = now
-            log(job, f"Worker node count increased to {total} in {now - start:.1f}s.")
+        if t_autoscaler is None:
+            trigger_epoch = find_autoscaler_trigger_time(start_epoch)
+            if trigger_epoch is not None:
+                t_autoscaler = trigger_epoch
+        if t_autoscaler is not None and not logged_autoscaler:
+            logged_autoscaler = True
+            log(job, f"Autoscaler triggered scale-up at {time.strftime('%H:%M:%S', time.gmtime(t_autoscaler))} UTC.")
+
+        if t_node_obj is None:
+            node_epoch = find_first_new_node_time(start_epoch)
+            if node_epoch is not None:
+                t_node_obj = node_epoch
+        if t_node_obj is not None and not logged_node_obj:
+            logged_node_obj = True
+            log(job, f"First new node object at {time.strftime('%H:%M:%S', time.gmtime(t_node_obj))} UTC.")
+
+        if not logged_provision_start and (t_autoscaler or t_node_obj):
+            logged_provision_start = True
+            if t_autoscaler:
+                log(job, "Node provisioning started (autoscaler trigger observed).")
+            else:
+                log(job, "Node provisioning started (node object observed).")
+
+        if not logged_provision and t_autoscaler and t_node_obj and t_node_obj >= t_autoscaler:
+            logged_provision = True
+            log(job, f"Node provisioning time (autoscaler->node object): {t_node_obj - t_autoscaler:.1f}s.")
+
+        if not logged_provision and t_node_obj and not t_autoscaler:
+            logged_provision = True
+            log(job, f"Node provisioning time (start->node object): {t_node_obj - start_epoch:.1f}s.")
 
         if t_nodes_ready is None and ready > start_ready:
             t_nodes_ready = now
@@ -239,8 +320,6 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
 
         time.sleep(POLL_INTERVAL)
 
-    if t_nodes_seen:
-        log(job, f"Node provisioning time: {t_nodes_seen - start:.1f}s.")
     if t_nodes_ready:
         log(job, f"Node ready time: {t_nodes_ready - start:.1f}s.")
     if t_pods_ready:
@@ -380,7 +459,7 @@ async def stream(job_id: str) -> StreamingResponse:
     async def event_generator():
         cursor = 0
         while True:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.12)
             with job.lock:
                 logs = job.logs[cursor:]
                 done = job.done
