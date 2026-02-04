@@ -907,6 +907,15 @@
   function updateSummary() {
     summaryDesiredPods.textContent = state.desiredPods !== null ? state.desiredPods : '—';
     summaryExpectedNodes.textContent = state.expectedNodes !== null ? state.expectedNodes : '—';
+    summaryAllNodes.textContent = state.allNodes !== null ? state.allNodes : '—';
+    const allNodesCard = summaryAllNodes?.closest('.summary-card');
+    if (allNodesCard) {
+      if (state.allNodes !== null && state.expectedNodes !== null && state.allNodes === state.expectedNodes) {
+        allNodesCard.style.display = 'none';
+      } else {
+        allNodesCard.style.display = '';
+      }
+    }
     summaryPodsReady.textContent = formatDuration(state.milestones.podReady);
     summaryNodesReady.textContent = formatDuration(state.milestones.nodeReady);
     summaryNodesProvision.textContent = formatDuration(state.milestones.nodeProvision);
