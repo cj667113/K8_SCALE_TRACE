@@ -513,7 +513,7 @@
             <div id="summaryDesiredPods" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Expected Nodes</div>
+            <div class="summary-label">Nodes in Pool</div>
             <div id="summaryExpectedNodes" class="summary-value">—</div>
           </div>
           <div class="summary-card">
@@ -705,6 +705,22 @@
   }
 
 
+
+  async function syncTargetReplicas(namespace, deployment) {
+    if (!namespace || !deployment) return;
+    try {
+      const res = await fetch(`/api/deployment?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(deployment)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (typeof data.replicas === 'number') {
+        podsInput.value = data.replicas;
+        setDerived();
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
   async function loadDeployments() {
     if (!targetSelect) return;
     try {
@@ -721,6 +737,7 @@
       const current = CONFIG.targetNamespace + '/' + CONFIG.targetDeployment;
       if (items.find((i) => i.namespace + '/' + i.name === current)) {
         targetSelect.value = current;
+        syncTargetReplicas(CONFIG.targetNamespace, CONFIG.targetDeployment);
       }
       if (!items.length) {
         targetHint.textContent = 'No deployments found (K8s disabled).';
@@ -749,6 +766,7 @@
       CONFIG.targetDeployment = deployment;
       targetHint.textContent = 'Target set to ' + namespace + '/' + deployment + '.';
       renderConfig();
+      syncTargetReplicas(namespace, deployment);
     } catch (err) {
       targetHint.textContent = 'Failed to update target.';
     }
@@ -756,8 +774,7 @@
 
   function setDerived() {
     const pods = parseInt(podsInput.value || '0', 10);
-    const nodes = CONFIG.maxPodsPerNode > 0 ? Math.ceil(pods / CONFIG.maxPodsPerNode) : 0;
-    derivedInfo.textContent = 'Expected nodes (max ' + CONFIG.maxPodsPerNode + ' pods/node): ' + nodes;
+    derivedInfo.textContent = 'Max pods per node: ' + CONFIG.maxPodsPerNode;
   }
 
   function renderConfig() {
@@ -877,10 +894,9 @@
       resetMetrics(true);
       renderEventsTable();
       state.startTimeMs = Number.isFinite(ts) ? ts : Date.now();
-      const match = message.match(/pods=(\d+).*expected_nodes=(\d+)/);
+      const match = message.match(/pods=(\d+)/);
       if (match) {
         state.desiredPods = parseInt(match[1], 10);
-        state.expectedNodes = parseInt(match[2], 10);
       }
       scaleHint.textContent = 'Scale job started at ' + formatTime(state.startTimeMs) + '.';
       appendEventRow('Scale request', scheduledAt, '—', 'Pods=' + state.desiredPods, new Date(ts).toISOString(), { pods: state.desiredPods, expectedNodes: state.expectedNodes }, Number.isFinite(ts) ? ts : null);
@@ -895,20 +911,19 @@
       }
     }
 
-    const statusMatch = message.match(/Status: nodes (\d+) \(ready (\d+), expected (\d+)\) \| pods ready (\d+)\/(\d+)/);
+    const statusMatch = message.match(/Status: nodes (\d+) \(ready (\d+)\) \| pods ready (\d+)\/(\d+)/);
     if (statusMatch) {
       const nodesReady = parseInt(statusMatch[2], 10);
-      const expectedNodes = parseInt(statusMatch[3], 10);
-      const podsReady = parseInt(statusMatch[4], 10);
-      const desiredPods = parseInt(statusMatch[5], 10);
-      state.expectedNodes = expectedNodes;
+            const podsReady = parseInt(statusMatch[3], 10);
+      const desiredPods = parseInt(statusMatch[4], 10);
+      state.expectedNodes = nodesReady;
       state.desiredPods = desiredPods;
-      recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, expectedNodes, desiredPods);
+      recordStatusSample(Number.isFinite(ts) ? ts : Date.now(), nodesReady, podsReady, nodesReady, desiredPods);
       const elapsed = state.startTimeMs ? ((Number.isFinite(ts) ? ts : Date.now()) - state.startTimeMs) / 1000 : null;
-      const statusKey = nodesReady + ':' + expectedNodes + ':' + podsReady + ':' + desiredPods;
+      const statusKey = nodesReady + ':' + podsReady + ':' + desiredPods;
       if (state.lastStatusKey !== statusKey) {
         state.lastStatusKey = statusKey;
-        appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + '/' + expectedNodes + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, expectedNodes, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
+        appendEventRow('Status', scheduledAt, formatDuration(elapsed), 'nodes ready ' + nodesReady + ', pods ready ' + podsReady + '/' + desiredPods, new Date(ts).toISOString(), { nodesReady, podsReady, desiredPods, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
       }
     }
 

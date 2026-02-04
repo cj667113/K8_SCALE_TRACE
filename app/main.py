@@ -45,7 +45,6 @@ class TargetRequest(BaseModel):
 class ScaleJob:
     job_id: str
     requested_pods: int
-    expected_nodes: int
     logs: List[str] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
     done: bool = False
@@ -160,22 +159,21 @@ def simulate_scale_job(job: ScaleJob) -> None:
         log(
             job,
             "Scale request received: "
-            f"pods={job.requested_pods}, expected_nodes={job.expected_nodes}, "
+            f"pods={job.requested_pods}, "
             f"max_pods_per_node={MAX_PODS_PER_NODE}.",
         )
         log(job, "Node scaling disabled; relying on Kubernetes autoscaler.")
         log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {job.requested_pods} replicas.")
 
         start = time.monotonic()
-        expected_nodes = job.expected_nodes
         nodes_ready = 0
         pods_ready = 0
 
         for step in range(1, 5):
             time.sleep(0.5)
-            nodes_ready = min(expected_nodes, nodes_ready + max(1, expected_nodes // 3 or 1))
+            nodes_ready = nodes_ready + 1
             pods_ready = min(job.requested_pods, pods_ready + max(1, job.requested_pods // 3 or 1))
-            log(job, f"Status: nodes {nodes_ready} (ready {nodes_ready}, expected {expected_nodes}) | "
+            log(job, f"Status: nodes {nodes_ready} (ready {nodes_ready}) | "
                      f"pods ready {pods_ready}/{job.requested_pods}.")
 
         t_nodes_seen = time.monotonic() - start
@@ -193,35 +191,17 @@ def simulate_scale_job(job: ScaleJob) -> None:
                 active_job_id = None
 
 
-def poll_until(job: ScaleJob, expected_nodes: int, desired_pods: int) -> None:
+def poll_until(job: ScaleJob, desired_pods: int) -> None:
     start = time.monotonic()
     nodes_start = list_worker_nodes()
-    current_nodes, current_ready = count_nodes(nodes_start)
-    track_nodes = expected_nodes > current_nodes
+    start_total, start_ready = count_nodes(nodes_start)
 
-    if track_nodes:
-        log(
-            job,
-            f"Current worker nodes: {current_nodes} (ready {current_ready}); "
-            f"target {expected_nodes} (scale out).",
-        )
-    else:
-        log(
-            job,
-            f"Current worker nodes: {current_nodes} (ready {current_ready}); "
-            f"expected {expected_nodes} already satisfied.",
-        )
-
+    log(job, f"Current worker nodes: {start_total} (ready {start_ready}).")
     log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {desired_pods} replicas.")
 
     t_nodes_seen: Optional[float] = None
     t_nodes_ready: Optional[float] = None
     t_pods_ready: Optional[float] = None
-
-    if not track_nodes:
-        t_nodes_seen = start
-        t_nodes_ready = start
-        log(job, "Skipping node scale-in timing; autoscaler handles node reductions.")
 
     last_status = 0.0
     while True:
@@ -238,27 +218,23 @@ def poll_until(job: ScaleJob, expected_nodes: int, desired_pods: int) -> None:
             log(job, f"Failed to read deployment status: {exc}")
             desired, ready_pods = desired_pods, 0
 
-        if track_nodes and t_nodes_seen is None and total >= expected_nodes:
+        if t_nodes_seen is None and total > start_total:
             t_nodes_seen = now
-            log(job, f"Worker node count reached {expected_nodes} in {now - start:.1f}s.")
+            log(job, f"Worker node count increased to {total} in {now - start:.1f}s.")
 
-        if track_nodes and t_nodes_ready is None and ready >= expected_nodes:
+        if t_nodes_ready is None and ready > start_ready:
             t_nodes_ready = now
-            log(job, f"Worker nodes Ready reached {expected_nodes} in {now - start:.1f}s.")
+            log(job, f"Worker nodes Ready increased to {ready} in {now - start:.1f}s.")
 
         if t_pods_ready is None and desired == desired_pods and ready_pods == desired_pods:
             t_pods_ready = now
             log(job, f"Pods Ready reached {desired_pods} in {now - start:.1f}s.")
 
         if now - last_status >= STATUS_INTERVAL:
-            log(
-                job,
-                f"Status: nodes {total} (ready {ready}, expected {expected_nodes}) | "
-                f"pods ready {ready_pods}/{desired_pods}.",
-            )
+            log(job, f"Status: nodes {total} (ready {ready}) | pods ready {ready_pods}/{desired_pods}.")
             last_status = now
 
-        if t_nodes_seen and t_nodes_ready and t_pods_ready:
+        if t_pods_ready:
             break
 
         time.sleep(POLL_INTERVAL)
@@ -277,7 +253,7 @@ def run_scale_job(job: ScaleJob) -> None:
         log(
             job,
             "Scale request received: "
-            f"pods={job.requested_pods}, expected_nodes={job.expected_nodes}, "
+            f"pods={job.requested_pods}, "
             f"max_pods_per_node={MAX_PODS_PER_NODE}.",
         )
 
@@ -289,7 +265,7 @@ def run_scale_job(job: ScaleJob) -> None:
         except ApiException as exc:
             log(job, f"Deployment scale API error: {exc}")
 
-        poll_until(job, job.expected_nodes, job.requested_pods)
+        poll_until(job, job.requested_pods)
     except Exception as exc:
         job.error = str(exc)
         log(job, f"Unhandled error: {exc}")
@@ -358,12 +334,24 @@ def list_deployments() -> JSONResponse:
 def set_target_endpoint(req: TargetRequest) -> JSONResponse:
     set_target(req.namespace, req.deployment)
     return JSONResponse({"targetNamespace": req.namespace, "targetDeployment": req.deployment})
+
+
+
+@app.get("/api/deployment")
+def get_deployment(namespace: str, name: str) -> JSONResponse:
+    if not getattr(app.state, "k8s_enabled", False):
+        return JSONResponse({"replicas": 0, "readyReplicas": 0})
+    apps: client.AppsV1Api = app.state.apps
+    dep = apps.read_namespaced_deployment(name=name, namespace=namespace)
+    return JSONResponse({
+        "replicas": dep.spec.replicas or 0,
+        "readyReplicas": dep.status.ready_replicas or 0,
+    })
 @app.post("/api/scale")
 def scale(req: ScaleRequest) -> JSONResponse:
     if req.namespace and req.deployment:
         set_target(req.namespace, req.deployment)
     desired_pods = req.pods
-    expected_nodes = math.ceil(desired_pods / MAX_PODS_PER_NODE) if MAX_PODS_PER_NODE > 0 else 0
 
     with jobs_lock:
         global active_job_id
@@ -372,7 +360,7 @@ def scale(req: ScaleRequest) -> JSONResponse:
             if active_job and not active_job.done:
                 raise HTTPException(status_code=409, detail="A scale job is already running.")
         job_id = str(uuid.uuid4())
-        job = ScaleJob(job_id=job_id, requested_pods=desired_pods, expected_nodes=expected_nodes)
+        job = ScaleJob(job_id=job_id, requested_pods=desired_pods)
         jobs[job_id] = job
         active_job_id = job_id
 
