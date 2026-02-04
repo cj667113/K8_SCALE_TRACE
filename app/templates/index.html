@@ -910,11 +910,9 @@
     summaryAllNodes.textContent = state.allNodes !== null ? state.allNodes : '—';
     const allNodesCard = summaryAllNodes?.closest('.summary-card');
     if (allNodesCard) {
-      if (state.allNodes !== null && state.expectedNodes !== null && state.allNodes === state.expectedNodes) {
-        allNodesCard.style.display = 'none';
-      } else {
-        allNodesCard.style.display = '';
-      }
+      const hideAllNodes = (state.allNodes === null || state.expectedNodes === null)
+        || (state.allNodes === state.expectedNodes);
+      allNodesCard.style.display = hideAllNodes ? 'none' : '';
     }
     summaryPodsReady.textContent = formatDuration(state.milestones.podReady);
     summaryNodesReady.textContent = formatDuration(state.milestones.nodeReady);
