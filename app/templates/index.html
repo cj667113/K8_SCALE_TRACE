@@ -735,9 +735,14 @@
         targetSelect.appendChild(opt);
       });
       const current = CONFIG.targetNamespace + '/' + CONFIG.targetDeployment;
-      if (items.find((i) => i.namespace + '/' + i.name === current)) {
+      const match = items.find((i) => i.namespace + '/' + i.name === current);
+      if (match) {
         targetSelect.value = current;
-        syncTargetReplicas(CONFIG.targetNamespace, CONFIG.targetDeployment);
+      } else if (items.length) {
+        targetSelect.value = current;
+      }
+      if (targetSelect.value) {
+        updateTarget(targetSelect.value);
       }
       if (!items.length) {
         targetHint.textContent = 'No deployments found (K8s disabled).';
@@ -1112,7 +1117,7 @@
     ctx.fillStyle = '#6c625a';
     ctx.font = '12px "Avenir Next", sans-serif';
     ctx.fillText('Time (s)', padding.left + chartW / 2 - 20, height - 4);
-    ctx.translate(8, padding.top + chartH / 2 + 24);
+    ctx.translate(18, padding.top + chartH / 2 + 24);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText('Ready count', 0, 0);
     ctx.restore();
