@@ -933,10 +933,49 @@
       .sort((a, b) => a.t - b.t)
       .filter((s, idx, arr) => idx === 0 || s.t !== arr[idx - 1].t);
 
-    if (windowSamples.length < 2) {
+    if (windowSamples.length === 0) {
       ctx.fillStyle = '#a5a29f';
       ctx.font = '14px "Avenir Next", sans-serif';
-      ctx.fillText('Not enough samples in the selected range.', 16, 28);
+      ctx.fillText('Waiting for status samples to draw the chart...', 16, 28);
+      return;
+    }
+
+    if (windowSamples.length === 1) {
+      const single = windowSamples[0];
+      const padding = { left: 72, right: 18, top: 18, bottom: 44 };
+      const chartW = width - padding.left - padding.right;
+      const chartH = height - padding.top - padding.bottom;
+      const maxValue = Math.max(single.podsReady, single.nodesReady, 1);
+
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padding.top + (chartH / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = '#8a8077';
+      ctx.font = '12px "Avenir Next", sans-serif';
+      ctx.fillText('0s', padding.left, height - 10);
+      ctx.fillText(String(maxValue), 10, padding.top + 8);
+
+      const x = padding.left + chartW * 0.5;
+      const yNodes = padding.top + chartH - (single.nodesReady / maxValue) * chartH;
+      const yPods = padding.top + chartH - (single.podsReady / maxValue) * chartH;
+
+      ctx.fillStyle = '#0f6d5b';
+      ctx.beginPath();
+      ctx.arc(x, yNodes, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#e36d2f';
+      ctx.beginPath();
+      ctx.arc(x, yPods, 4, 0, Math.PI * 2);
+      ctx.fill();
+
       return;
     }
 
