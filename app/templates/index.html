@@ -925,6 +925,12 @@
         row.dataset.elapsed = String(data.elapsedSec);
       }
     }
+    if (!row.dataset.elapsed && typeof duration === 'string' && duration.endsWith('s')) {
+      const parsed = parseFloat(duration);
+      if (!Number.isNaN(parsed)) {
+        row.dataset.elapsed = String(parsed);
+      }
+    }
     row.dataset.seq = String(++eventSeq);
     const cols = [event, scheduledAt, duration, details];
     cols.forEach((value) => {
@@ -1068,7 +1074,7 @@
       const action = nodeReadyIncrease[1];
       const readyCount = parseInt(nodeReadyIncrease[2], 10);
       const elapsedSec = parseFloat(nodeReadyIncrease[3]);
-      appendEventRow('Nodes ready', scheduledAt, elapsedSec + 's', 'Ready nodes: ' + readyCount + ' (' + action + ')', new Date(ts).toISOString(), { readyNodes: readyCount, action, elapsedSec }, Number.isFinite(ts) ? ts : null);
+      appendEventRow('Nodes ready', scheduledAt, formatDuration(elapsedSec), 'Ready nodes: ' + readyCount + ' (' + action + ')', new Date(ts).toISOString(), { readyNodes: readyCount, action, elapsedSec }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
