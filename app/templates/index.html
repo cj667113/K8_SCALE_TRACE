@@ -433,7 +433,7 @@
     <header class="header">
       <div>
         <div class="title">Scaleout Control</div>
-        <p class="subtitle">Scale pod replicas and let autoscaler add nodes. Target max __MAX_PODS_PER_NODE__ pods per node.</p>
+        <p class="subtitle">Scale pod replicas and let autoscaler add nodes.</p>
       </div>
       <div class="badge">Autoscaler-managed</div>
     </header>
@@ -607,25 +607,30 @@
 
   const chartLegend = document.getElementById('chartLegend');
 
+  function buildLegendItems(showAllNodes) {
+    const items = [
+      { label: 'Worker nodes ready', color: '#0f6d5b', className: 'nodes' },
+    ];
+    if (showAllNodes) {
+      items.push({ label: 'All nodes ready', color: '#1f7dcf', className: 'all-nodes' });
+    }
+    items.push({ label: 'Pods ready', color: '#e36d2f', className: 'pods' });
+    return items;
+  }
+
   function renderLegend(showAllNodes) {
+    const items = buildLegendItems(showAllNodes);
+    if (typeof state !== 'undefined') {
+      state.lastLegendItems = items;
+    }
     if (!chartLegend) return;
     chartLegend.innerHTML = '';
-    const nodesSpan = document.createElement('span');
-    nodesSpan.className = 'nodes';
-    nodesSpan.textContent = 'Worker nodes ready';
-    chartLegend.appendChild(nodesSpan);
-
-    if (showAllNodes) {
-      const allSpan = document.createElement('span');
-      allSpan.className = 'all-nodes';
-      allSpan.textContent = 'All nodes ready';
-      chartLegend.appendChild(allSpan);
-    }
-
-    const podsSpan = document.createElement('span');
-    podsSpan.className = 'pods';
-    podsSpan.textContent = 'Pods ready';
-    chartLegend.appendChild(podsSpan);
+    items.forEach((item) => {
+      const span = document.createElement('span');
+      span.className = item.className;
+      span.textContent = item.label;
+      chartLegend.appendChild(span);
+    });
   }
 
   const chartCanvas = document.getElementById('scaleChart');
@@ -705,6 +710,7 @@
     statusSamples: [],
     seenScaleRequest: false,
     lastStatusKey: null,
+    lastLegendItems: null,
     milestones: {
       nodeProvision: null,
       nodeReady: null,
@@ -857,7 +863,7 @@
 
   function setDerived() {
     const pods = parseInt(podsInput.value || '0', 10);
-    derivedInfo.textContent = 'Max pods per node: ' + CONFIG.maxPodsPerNode;
+    derivedInfo.textContent = 'Autoscaler-managed node scaling.';
   }
 
   function renderConfig() {
@@ -865,7 +871,6 @@
       'namespace: ' + CONFIG.targetNamespace,
       'deployment: ' + CONFIG.targetDeployment,
       CONFIG.nodeSelector ? 'node selector: ' + CONFIG.nodeSelector : 'node selector: auto',
-      'max pods per node: ' + CONFIG.maxPodsPerNode,
     ];
     configPills.innerHTML = '';
     items.forEach((item) => {
@@ -1377,9 +1382,34 @@
   }
 
   function exportGraph() {
+    const items = state.lastLegendItems || buildLegendItems(false);
+    const srcCanvas = chartCanvas;
+    const dpr = window.devicePixelRatio || 1;
+    const extraHeight = items.length ? Math.round(32 * dpr) : 0;
+    const newCanvas = document.createElement('canvas');
+    newCanvas.width = srcCanvas.width;
+    newCanvas.height = srcCanvas.height + extraHeight;
+    const ctx = newCanvas.getContext('2d');
+    ctx.drawImage(srcCanvas, 0, 0);
+
+    if (items.length) {
+      const legendY = srcCanvas.height + Math.round(16 * dpr);
+      let legendX = Math.round(20 * dpr);
+      ctx.textBaseline = 'middle';
+      ctx.font = `${12 * dpr}px "Avenir Next", sans-serif`;
+      items.forEach((item) => {
+        ctx.fillStyle = item.color;
+        ctx.beginPath();
+        ctx.arc(legendX, legendY, Math.round(5 * dpr), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillText(item.label, legendX + Math.round(12 * dpr), legendY);
+        legendX += Math.round(12 * dpr) + ctx.measureText(item.label).width + Math.round(28 * dpr);
+      });
+    }
+
     const link = document.createElement('a');
     link.download = 'scaleout-graph.png';
-    link.href = chartCanvas.toDataURL('image/png');
+    link.href = newCanvas.toDataURL('image/png');
     link.click();
   }
 
