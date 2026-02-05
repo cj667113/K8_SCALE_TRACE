@@ -331,6 +331,8 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
     t_nodes_ready: Optional[float] = None
     t_pods_ready: Optional[float] = None
     last_ready_logged = start_ready
+    max_total_seen = start_total
+    last_all_ready_total: Optional[int] = None
     logged_autoscaler = False
     logged_node_obj = False
     logged_provision = False
@@ -345,6 +347,8 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
 
         nodes = list_worker_nodes()
         total, ready = count_nodes(nodes)
+        if total > max_total_seen:
+            max_total_seen = total
         for node in nodes:
             name = node.metadata.name if node.metadata else None
             created = node.metadata.creation_timestamp if node.metadata else None
@@ -395,8 +399,12 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             else:
                 log(job, f"Worker nodes Ready changed to {ready} in {now - start:.1f}s.")
             last_ready_logged = ready
-        if t_nodes_ready is None and ready > start_ready:
-            t_nodes_ready = now
+
+        if ready == total and total == max_total_seen and total > start_total:
+            if last_all_ready_total != total:
+                last_all_ready_total = total
+                t_nodes_ready = now
+                log(job, f"All worker nodes Ready reached {total} in {now - start:.1f}s.")
 
         if t_pods_ready is None and desired == desired_pods and ready_pods == desired_pods:
             t_pods_ready = now

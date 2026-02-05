@@ -1078,6 +1078,15 @@
       updateSummary();
     }
 
+    const allReadyMatch = message.match(/All worker nodes Ready reached (\d+) in ([\d.]+)s/);
+    if (allReadyMatch) {
+      const readyCount = parseInt(allReadyMatch[1], 10);
+      const elapsedSec = parseFloat(allReadyMatch[2]);
+      state.milestones.nodeReady = elapsedSec;
+      appendEventRow('All nodes ready', scheduledAt, formatDuration(elapsedSec), 'Worker nodes ready: ' + readyCount, new Date(ts).toISOString(), { readyNodes: readyCount, elapsedSec }, Number.isFinite(ts) ? ts : null);
+      updateSummary();
+    }
+
     const nodeReadyMatch = message.match(/Node ready time: ([\d.]+)s/);
     if (nodeReadyMatch) {
       state.milestones.nodeReady = parseFloat(nodeReadyMatch[1]);
