@@ -303,9 +303,16 @@ def simulate_scale_job(job: ScaleJob) -> None:
         t_nodes_seen = time.monotonic() - start
         t_nodes_ready = t_nodes_seen + 1.2
         t_pods_ready = t_nodes_ready + 1.5
-        log(job, f"Node provisioning time: {t_nodes_seen:.1f}s.")
-        log(job, f"Node ready time: {t_nodes_ready:.1f}s.")
-        log(job, f"Pod readiness time: {t_pods_ready:.1f}s.")
+        node_count = max(1, nodes_ready)
+        total_provision = t_nodes_seen
+        avg_provision = total_provision / node_count
+        total_ready = t_nodes_ready
+        avg_ready = total_ready / node_count
+        total_pods = t_pods_ready
+        avg_pods = total_pods / max(1, job.requested_pods)
+        log(job, f"Node provisioning total time: {total_provision:.1f}s (avg {avg_provision:.1f}s over {node_count} nodes).")
+        log(job, f"Node ready total time: {total_ready:.1f}s (avg {avg_ready:.1f}s over {node_count} nodes).")
+        log(job, f"Pod readiness total time: {total_pods:.1f}s (avg {avg_pods:.2f}s per pod).")
     finally:
         job.done = True
         log(job, "Scale operation complete.")
@@ -322,6 +329,8 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
     start_total, start_ready = count_nodes(nodes_start)
     all_total, all_ready = count_all_nodes()
     seen_nodes = {node.metadata.name for node in nodes_start if node.metadata and node.metadata.name}
+    node_created: dict[str, float] = {}
+    node_ready: dict[str, float] = {}
 
     log(job, f"Current worker nodes: {start_total} (ready {start_ready}); all nodes: {all_total} (ready {all_ready}).")
     log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {desired_pods} replicas.")
@@ -355,7 +364,21 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             if name and name not in seen_nodes:
                 seen_nodes.add(name)
                 ts = created.strftime("%H:%M:%S") + " UTC" if created else "unknown"
+                created_epoch = _event_time_to_epoch(created)
+                if created_epoch is not None and created_epoch >= start_epoch:
+                    node_created[name] = created_epoch
                 log(job, f"New node object detected: {name} at {ts}.")
+        for node in nodes:
+            name = node.metadata.name if node.metadata else None
+            if not name or name not in node_created or name in node_ready:
+                continue
+            conditions = node.status.conditions or []
+            for condition in conditions:
+                if condition.type == "Ready" and condition.status == "True":
+                    ready_epoch = _event_time_to_epoch(condition.last_transition_time) or time.time()
+                    node_ready[name] = ready_epoch
+                    break
+
         try:
             desired, ready_pods = read_deployment_ready(*get_target())
         except ApiException as exc:
@@ -420,10 +443,27 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
 
         time.sleep(POLL_INTERVAL)
 
-    if t_nodes_ready:
-        log(job, f"Node ready time: {t_nodes_ready - start:.1f}s.")
-    if t_pods_ready:
-        log(job, f"Pod readiness time: {t_pods_ready - start:.1f}s.")
+    created_epochs = list(node_created.values())
+    if created_epochs:
+        total_provision = max(created_epochs) - start_epoch
+        avg_provision = sum(max(0.0, t - start_epoch) for t in created_epochs) / len(created_epochs)
+        log(job, f"Node provisioning total time: {total_provision:.1f}s (avg {avg_provision:.1f}s over {len(created_epochs)} nodes).")
+
+    ready_epochs = [node_ready[name] for name in node_ready if name in node_created]
+    ready_durations = []
+    for name, ready_epoch in node_ready.items():
+        created_epoch = node_created.get(name)
+        if created_epoch is not None:
+            ready_durations.append(max(0.0, ready_epoch - created_epoch))
+    if ready_epochs:
+        total_ready = max(ready_epochs) - start_epoch
+        avg_ready = sum(ready_durations) / len(ready_durations) if ready_durations else 0.0
+        log(job, f"Node ready total time: {total_ready:.1f}s (avg {avg_ready:.1f}s over {len(ready_durations)} nodes).")
+
+    if t_pods_ready is not None:
+        total_pods = t_pods_ready - start
+        avg_pods = (total_pods / desired_pods) if desired_pods > 0 else 0.0
+        log(job, f"Pod readiness total time: {total_pods:.1f}s (avg {avg_pods:.2f}s per pod).")
 
 
 

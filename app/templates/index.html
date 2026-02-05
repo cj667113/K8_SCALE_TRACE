@@ -510,39 +510,51 @@
       <div id="tab-timing" class="tab-panel" role="tabpanel">
         <div class="summary-grid">
           <div class="summary-card">
-            <div class="summary-label">Desired Pods</div>
+            <div class="summary-label" title="Target replica count for the selected deployment.">Desired Pods</div>
             <div id="summaryDesiredPods" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Worker Nodes</div>
+            <div class="summary-label" title="Current worker node count in the pool during this run.">Worker Nodes</div>
             <div id="summaryExpectedNodes" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">All Nodes</div>
+            <div class="summary-label" title="Total nodes in the cluster (including non-worker if present).">All Nodes</div>
             <div id="summaryAllNodes" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Pod Ready Time</div>
+            <div class="summary-label" title="Total time for pods to reach Ready.">Pod Ready Time</div>
             <div id="summaryPodsReady" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Node Ready Time</div>
+            <div class="summary-label" title="Total time until all new worker nodes became Ready.">Node Ready Time</div>
             <div id="summaryNodesReady" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Node Provision Time</div>
+            <div class="summary-label" title="Total time until the last new node object appeared.">Node Provision Time</div>
             <div id="summaryNodesProvision" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Completion</div>
+            <div class="summary-label" title="Average time from scale start to each new node object.">Avg Node Provision</div>
+            <div id="summaryAvgNodeProvision" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label" title="Average time from node creation to Ready.">Avg Node Ready</div>
+            <div id="summaryAvgNodeReady" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label" title="Average time per pod to reach Ready (total / desired pods).">Avg Pod Ready</div>
+            <div id="summaryAvgPodReady" class="summary-value">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label" title="Overall completion time (pods Ready).">Completion</div>
             <div id="summaryCompletion" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Started</div>
+            <div class="summary-label" title="Timestamp when the scale request started.">Started</div>
             <div id="summaryStarted" class="summary-value">—</div>
           </div>
           <div class="summary-card">
-            <div class="summary-label">Finished</div>
+            <div class="summary-label" title="Timestamp when the run completed.">Finished</div>
             <div id="summaryFinished" class="summary-value">—</div>
           </div>
         </div>
@@ -600,6 +612,9 @@
   const summaryPodsReady = document.getElementById('summaryPodsReady');
   const summaryNodesReady = document.getElementById('summaryNodesReady');
   const summaryNodesProvision = document.getElementById('summaryNodesProvision');
+  const summaryAvgNodeProvision = document.getElementById('summaryAvgNodeProvision');
+  const summaryAvgNodeReady = document.getElementById('summaryAvgNodeReady');
+  const summaryAvgPodReady = document.getElementById('summaryAvgPodReady');
   const summaryCompletion = document.getElementById('summaryCompletion');
   const summaryStarted = document.getElementById('summaryStarted');
   const summaryFinished = document.getElementById('summaryFinished');
@@ -713,8 +728,11 @@
     lastLegendItems: null,
     milestones: {
       nodeProvision: null,
+      nodeProvisionAvg: null,
       nodeReady: null,
+      nodeReadyAvg: null,
       podReady: null,
+      podReadyAvg: null,
     }
   };
 
@@ -760,7 +778,7 @@
     state.desiredPods = null;
     state.statusSamples = [];
     state.lastStatusKey = null;
-    state.milestones = { nodeProvision: null, nodeReady: null, podReady: null };
+    state.milestones = { nodeProvision: null, nodeProvisionAvg: null, nodeReady: null, nodeReadyAvg: null, podReady: null, podReadyAvg: null };
     updateSummary();
     drawChart();
     scaleHint.textContent = 'Ready to scale.';
@@ -959,6 +977,9 @@
     summaryPodsReady.textContent = formatDuration(state.milestones.podReady);
     summaryNodesReady.textContent = formatDuration(state.milestones.nodeReady);
     summaryNodesProvision.textContent = formatDuration(state.milestones.nodeProvision);
+    summaryAvgNodeProvision.textContent = formatDuration(state.milestones.nodeProvisionAvg);
+    summaryAvgNodeReady.textContent = formatDuration(state.milestones.nodeReadyAvg);
+    summaryAvgPodReady.textContent = formatDuration(state.milestones.podReadyAvg);
     summaryCompletion.textContent = formatDuration(state.milestones.podReady);
     summaryStarted.textContent = formatTime(state.startTimeMs);
     summaryFinished.textContent = formatTime(state.endTimeMs);
@@ -1067,10 +1088,12 @@
       updateSummary();
     }
 
-    const provisionMatch = message.match(/Node provisioning time.*?: ([\d.]+)s/);
-    if (provisionMatch) {
-      state.milestones.nodeProvision = parseFloat(provisionMatch[1]);
-      appendEventRow('Node provision', scheduledAt, formatDuration(state.milestones.nodeProvision), 'Node objects seen', new Date(ts).toISOString(), { nodeProvisionSec: state.milestones.nodeProvision, elapsedSec: state.milestones.nodeProvision }, Number.isFinite(ts) ? ts : null);
+    const provisionTotalMatch = message.match(/Node provisioning total time: ([\d.]+)s(?: \(avg ([\d.]+)s over (\d+) nodes\))?/);
+    if (provisionTotalMatch) {
+      state.milestones.nodeProvision = parseFloat(provisionTotalMatch[1]);
+      state.milestones.nodeProvisionAvg = provisionTotalMatch[2] ? parseFloat(provisionTotalMatch[2]) : null;
+      const avgDetail = provisionTotalMatch[2] ? `Avg ${provisionTotalMatch[2]}s over ${provisionTotalMatch[3]} nodes` : 'Total node provisioning';
+      appendEventRow('Node provision total', scheduledAt, formatDuration(state.milestones.nodeProvision), avgDetail, new Date(ts).toISOString(), { nodeProvisionSec: state.milestones.nodeProvision, avgNodeProvisionSec: state.milestones.nodeProvisionAvg, nodes: provisionTotalMatch[3] ? parseInt(provisionTotalMatch[3], 10) : null, elapsedSec: state.milestones.nodeProvision }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
@@ -1092,18 +1115,22 @@
       updateSummary();
     }
 
-    const nodeReadyMatch = message.match(/Node ready time: ([\d.]+)s/);
-    if (nodeReadyMatch) {
-      state.milestones.nodeReady = parseFloat(nodeReadyMatch[1]);
-      appendEventRow('Node ready', scheduledAt, formatDuration(state.milestones.nodeReady), 'Worker nodes ready', new Date(ts).toISOString(), { nodeReadySec: state.milestones.nodeReady, elapsedSec: state.milestones.nodeReady }, Number.isFinite(ts) ? ts : null);
+    const nodeReadyTotalMatch = message.match(/Node ready total time: ([\d.]+)s(?: \(avg ([\d.]+)s over (\d+) nodes\))?/);
+    if (nodeReadyTotalMatch) {
+      state.milestones.nodeReady = parseFloat(nodeReadyTotalMatch[1]);
+      state.milestones.nodeReadyAvg = nodeReadyTotalMatch[2] ? parseFloat(nodeReadyTotalMatch[2]) : null;
+      const avgDetail = nodeReadyTotalMatch[2] ? `Avg ${nodeReadyTotalMatch[2]}s over ${nodeReadyTotalMatch[3]} nodes` : 'Total node readiness';
+      appendEventRow('Node ready total', scheduledAt, formatDuration(state.milestones.nodeReady), avgDetail, new Date(ts).toISOString(), { nodeReadySec: state.milestones.nodeReady, avgNodeReadySec: state.milestones.nodeReadyAvg, nodes: nodeReadyTotalMatch[3] ? parseInt(nodeReadyTotalMatch[3], 10) : null, elapsedSec: state.milestones.nodeReady }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
 
-    const podReadyMatch = message.match(/Pod readiness time: ([\d.]+)s/);
+    const podReadyMatch = message.match(/Pod readiness total time: ([\d.]+)s(?: \(avg ([\d.]+)s per pod\))?/);
     if (podReadyMatch) {
       state.milestones.podReady = parseFloat(podReadyMatch[1]);
+      state.milestones.podReadyAvg = podReadyMatch[2] ? parseFloat(podReadyMatch[2]) : null;
       state.endTimeMs = state.startTimeMs ? state.startTimeMs + state.milestones.podReady * 1000 : Date.now();
-      appendEventRow('Pods ready', scheduledAt, formatDuration(state.milestones.podReady), 'Pods reached Ready', new Date(ts).toISOString(), { podsReadySec: state.milestones.podReady, pods: state.desiredPods, elapsedSec: state.milestones.podReady }, Number.isFinite(ts) ? ts : null);
+      const avgDetail = podReadyMatch[2] ? `Avg ${podReadyMatch[2]}s per pod` : 'Pods reached Ready';
+      appendEventRow('Pod ready total', scheduledAt, formatDuration(state.milestones.podReady), avgDetail, new Date(ts).toISOString(), { podsReadySec: state.milestones.podReady, avgPodReadySec: state.milestones.podReadyAvg, pods: state.desiredPods, elapsedSec: state.milestones.podReady }, Number.isFinite(ts) ? ts : null);
       updateSummary();
     }
   }
