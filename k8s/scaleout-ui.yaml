@@ -47,6 +47,13 @@ spec:
       labels:
         app: scaleout-ui
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: scaleout-ui
+              topologyKey: kubernetes.io/hostname
       serviceAccountName: scaleout-ui
       containers:
         - name: scaleout-ui
