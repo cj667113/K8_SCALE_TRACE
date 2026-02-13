@@ -1072,6 +1072,14 @@
       updateSummary();
     }
 
+    const karpenterMatch = message.match(/Karpenter triggered scale-up at (.+) UTC/);
+    if (karpenterMatch) {
+      const elapsed = elapsedSinceStart(ts);
+      const duration = elapsed !== null ? elapsed.toFixed(1) + 's' : '—';
+      appendEventRow('Karpenter trigger', scheduledAt, duration, 'Scale-up triggered', new Date(ts).toISOString(), { triggerTime: karpenterMatch[1], elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
+      updateSummary();
+    }
+
     const nodeObjMatch = message.match(/First new node object at (.+) UTC/);
     if (nodeObjMatch) {
       const elapsed = elapsedSinceStart(ts);

@@ -19,8 +19,6 @@ APP_TITLE = "Scaleout Controller"
 
 TARGET_NAMESPACE = os.getenv("TARGET_NAMESPACE", "default")
 TARGET_DEPLOYMENT = os.getenv("TARGET_DEPLOYMENT", "scaleout-ui")
-MAX_PODS_PER_NODE = int(os.getenv("MAX_PODS_PER_NODE", os.getenv("REPLICAS_PER_NODE", "20")))
-MAX_PODS_PER_NODE = max(1, min(MAX_PODS_PER_NODE, 20))
 NODE_SELECTOR = os.getenv("NODE_SELECTOR", "").strip()
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "5"))
 STATUS_INTERVAL = float(os.getenv("STATUS_INTERVAL", "15"))
@@ -197,6 +195,42 @@ def find_autoscaler_trigger_time(since_epoch: float) -> float | None:
     return earliest
 
 
+
+
+def find_karpenter_trigger_time(since_epoch: float) -> float | None:
+    if not getattr(app.state, "k8s_enabled", False):
+        return None
+
+    candidates = []
+    try:
+        core: client.CoreV1Api = app.state.core
+        candidates.extend(core.list_namespaced_event(namespace="karpenter").items)
+    except Exception:
+        pass
+
+    try:
+        events_api = client.EventsV1Api()
+        candidates.extend(events_api.list_namespaced_event(namespace="karpenter").items)
+    except Exception:
+        pass
+
+    earliest = None
+    for ev in candidates:
+        source_name = _event_source_name(ev).lower()
+        involved_name = _event_involved_name(ev).lower()
+        message = _event_message(ev).lower()
+        reason = str(getattr(ev, "reason", "") or "").lower()
+        if "karpenter" not in source_name and "karpenter" not in involved_name:
+            continue
+        if not any(token in reason for token in ("provision", "launch", "create", "scale")) and            not any(token in message for token in ("provision", "launch", "create", "scale")):
+            continue
+        ts = _event_timestamp(ev)
+        epoch = _event_time_to_epoch(ts)
+        if epoch is None or epoch < since_epoch:
+            continue
+        if earliest is None or epoch < earliest:
+            earliest = epoch
+    return earliest
 def find_first_new_node_time(start_epoch: float) -> float | None:
     nodes = list_worker_nodes()
     earliest = None
@@ -244,6 +278,8 @@ def list_worker_nodes() -> List[client.V1Node]:
         taints = node.spec.taints or []
         if any(t.key in ("node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master") for t in taints):
             continue
+        if any(t.key.startswith("karpenter.sh/disruption") or t.key == "karpenter.sh/disrupted" for t in taints if t.key):
+            continue
         filtered.append(node)
     return filtered
 
@@ -283,8 +319,7 @@ def simulate_scale_job(job: ScaleJob) -> None:
         log(
             job,
             "Scale request received: "
-            f"pods={job.requested_pods}, "
-            f"max_pods_per_node={MAX_PODS_PER_NODE}.",
+            f"pods={job.requested_pods}.",
         )
         log(job, "Node scaling disabled; relying on Kubernetes autoscaler.")
         log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {job.requested_pods} replicas.")
@@ -336,6 +371,7 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
     log(job, f"Target deployment {get_target()[0]}/{get_target()[1]} -> {desired_pods} replicas.")
 
     t_autoscaler: Optional[float] = None
+    t_karpenter: Optional[float] = None
     t_node_obj: Optional[float] = None
     t_nodes_ready: Optional[float] = None
     t_pods_ready: Optional[float] = None
@@ -343,6 +379,7 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
     max_total_seen = start_total
     last_all_ready_total: Optional[int] = None
     logged_autoscaler = False
+    logged_karpenter = False
     logged_node_obj = False
     logged_provision = False
     logged_provision_start = False
@@ -393,6 +430,14 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             logged_autoscaler = True
             log(job, f"Autoscaler triggered scale-up at {time.strftime('%H:%M:%S', time.gmtime(t_autoscaler))} UTC.")
 
+        if t_karpenter is None:
+            karpenter_epoch = find_karpenter_trigger_time(start_epoch - 60)
+            if karpenter_epoch is not None:
+                t_karpenter = karpenter_epoch
+        if t_karpenter is not None and not logged_karpenter:
+            logged_karpenter = True
+            log(job, f"Karpenter triggered scale-up at {time.strftime('%H:%M:%S', time.gmtime(t_karpenter))} UTC.")
+
         if t_node_obj is None:
             node_epoch = find_first_new_node_time(start_epoch)
             if node_epoch is not None:
@@ -401,10 +446,12 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             logged_node_obj = True
             log(job, f"First new node object at {time.strftime('%H:%M:%S', time.gmtime(t_node_obj))} UTC.")
 
-        if not logged_provision_start and (t_autoscaler or t_node_obj):
+        if not logged_provision_start and (t_autoscaler or t_karpenter or t_node_obj):
             logged_provision_start = True
             if t_autoscaler:
                 log(job, "Node provisioning started (autoscaler trigger observed).")
+            elif t_karpenter:
+                log(job, "Node provisioning started (karpenter trigger observed).")
             else:
                 log(job, "Node provisioning started (node object observed).")
 
@@ -412,7 +459,11 @@ def poll_until(job: ScaleJob, desired_pods: int) -> None:
             logged_provision = True
             log(job, f"Node provisioning time (autoscaler->node object): {t_node_obj - t_autoscaler:.1f}s.")
 
-        if not logged_provision and t_node_obj and not t_autoscaler:
+        if not logged_provision and t_karpenter and t_node_obj and t_node_obj >= t_karpenter:
+            logged_provision = True
+            log(job, f"Node provisioning time (karpenter->node object): {t_node_obj - t_karpenter:.1f}s.")
+
+        if not logged_provision and t_node_obj and not t_autoscaler and not t_karpenter:
             logged_provision = True
             log(job, f"Node provisioning time (start->node object): {t_node_obj - start_epoch:.1f}s.")
 
@@ -472,8 +523,7 @@ def run_scale_job(job: ScaleJob) -> None:
         log(
             job,
             "Scale request received: "
-            f"pods={job.requested_pods}, "
-            f"max_pods_per_node={MAX_PODS_PER_NODE}.",
+            f"pods={job.requested_pods}.",
         )
 
         log(job, "Node scaling disabled; relying on Kubernetes autoscaler.")
@@ -499,7 +549,6 @@ def run_scale_job(job: ScaleJob) -> None:
 
 def render_index() -> str:
     config_payload = {
-        "maxPodsPerNode": MAX_PODS_PER_NODE,
         "targetNamespace": get_target()[0],
         "targetDeployment": get_target()[1],
         "nodeSelector": NODE_SELECTOR,
@@ -507,7 +556,6 @@ def render_index() -> str:
     config_json = json.dumps(config_payload)
     template = app.state.index_template
     page = template.replace("__CONFIG_JSON__", config_json)
-    page = page.replace("__MAX_PODS_PER_NODE__", str(MAX_PODS_PER_NODE))
     return page
 
 
@@ -526,8 +574,7 @@ def healthz() -> JSONResponse:
 def config_endpoint() -> JSONResponse:
     return JSONResponse(
         {
-            "maxPodsPerNode": MAX_PODS_PER_NODE,
-            "targetNamespace": get_target()[0],
+                "targetNamespace": get_target()[0],
             "targetDeployment": get_target()[1],
             "nodeSelector": NODE_SELECTOR,
         }

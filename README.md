@@ -11,15 +11,12 @@ A lightweight web UI that scales a target Deployment and monitors worker nodes (
   - Pods reaching Ready
 - Web UI tabs for: pod input, live events, timing summary, and a scaling graph export.
 
-> Note: The app caps `MAX_PODS_PER_NODE` at 20 to honor the “no more than 20 pods per worker node” requirement.
-
 ## Node scaling
 The app does not directly scale nodes. Use OCI Kubernetes Autoscaler to add/remove nodes as pods scale.
 
 ## Environment variables
 - `TARGET_NAMESPACE` (default: `default`)
 - `TARGET_DEPLOYMENT` (default: `sample-app`)
-- `MAX_PODS_PER_NODE` (default: `20`, maximum enforced)
 - `NODE_SELECTOR` (default: empty) label selector for worker nodes, e.g. `node-role.kubernetes.io/worker=`
 - `POLL_INTERVAL` (default: `5` seconds)
 - `STATUS_INTERVAL` (default: `15` seconds)
@@ -33,7 +30,6 @@ docker build -t scaleout-ui:local .
 docker run --rm -p 8000:8000 \
   -e TARGET_NAMESPACE=default \
   -e TARGET_DEPLOYMENT=sample-app \
-  -e MAX_PODS_PER_NODE=20 \
   -e UI_ONLY_MODE=true \
   scaleout-ui:local
 ```
@@ -57,6 +53,5 @@ http://<worker-node-ip>:30080
 
 ## Notes and limitations
 - The app targets a single Deployment and scales its replicas to the desired pod count.
-- `MAX_PODS_PER_NODE` is used to estimate required nodes for timing; Kubernetes scheduling may still place pods unevenly if other workloads are present.
 - For stricter distribution, consider setting resource requests and adding topology spread constraints to the target Deployment.
 - To scale non-CAPI node pools, replace the node-scaler logic with your cloud provider API.

@@ -57,8 +57,6 @@ spec:
               value: "default"
             - name: TARGET_DEPLOYMENT
               value: "scaleout-ui"
-            - name: MAX_PODS_PER_NODE
-              value: "20"
             - name: NODE_SELECTOR
               value: ""
             - name: TIMEOUT_SECONDS
