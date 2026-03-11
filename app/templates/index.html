@@ -667,6 +667,7 @@
   let sseLastEventId = null;
   let reconnectTimer = null;
   let reconnectNoticeShown = false;
+  let reconnectAttempts = 0;
 
   const CLIENT_LIMITS = CONFIG.clientLimits || {};
   const MAX_LOG_LINES = Number.isFinite(CLIENT_LIMITS.maxLogLines) ? CLIENT_LIMITS.maxLogLines : 1500;
@@ -792,9 +793,11 @@
       window.clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    reconnectAttempts = 0;
     if (eventSource) {
-      eventSource.close();
+      const source = eventSource;
       eventSource = null;
+      source.close();
     }
   }
 
@@ -806,25 +809,36 @@
     return url.toString();
   }
 
-  function scheduleStreamReconnect() {
+  function scheduleStreamReconnect(source) {
     if (sseDone || !sseJobId || reconnectTimer) return;
+    const delayMs = Math.min(10000, 2000 * Math.max(1, reconnectAttempts + 1));
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
       if (sseDone || !sseJobId) return;
-      if (eventSource && eventSource.readyState !== EventSource.CLOSED) return;
+      if (eventSource && eventSource !== source && eventSource.readyState !== EventSource.CLOSED) {
+        return;
+      }
+      if (eventSource === source) {
+        eventSource = null;
+        source.close();
+      }
+      reconnectAttempts += 1;
       connectLogStream(sseJobId, true);
-    }, 2000);
+    }, delayMs);
   }
 
   function connectLogStream(jobId, isReconnect) {
     if (eventSource) {
-      eventSource.close();
+      const previousSource = eventSource;
+      eventSource = null;
+      previousSource.close();
     }
     const source = new EventSource(buildStreamUrl(jobId));
     eventSource = source;
 
     source.onopen = () => {
       if (eventSource !== source) return;
+      reconnectAttempts = 0;
       if (reconnectNoticeShown || isReconnect) {
         addLog('Log stream reconnected.');
       }
@@ -861,9 +875,7 @@
         addLog('Log stream interrupted. Waiting to reconnect...');
         reconnectNoticeShown = true;
       }
-      if (source.readyState === EventSource.CLOSED) {
-        scheduleStreamReconnect();
-      }
+      scheduleStreamReconnect(source);
     };
   }
 

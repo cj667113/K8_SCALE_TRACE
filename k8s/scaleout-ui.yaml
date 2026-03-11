@@ -54,7 +54,7 @@ spec:
       containers:
         - name: scaleout-ui
           image: ocir.us-ashburn-1.oci.oraclecloud.com/orasenatdpltoci03/k8_scale_trace:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: TARGET_NAMESPACE
               value: "default"
