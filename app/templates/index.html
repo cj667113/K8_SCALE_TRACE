@@ -433,9 +433,9 @@
     <header class="header">
       <div>
         <div class="title">Scaleout Control</div>
-        <p class="subtitle">Scale pod replicas and let autoscaler add nodes.</p>
+        <p class="subtitle">Scale pod replicas and observe cluster-autoscaler or Karpenter activity.</p>
       </div>
-      <div class="badge">Autoscaler-managed</div>
+      <div class="badge">Externally Scaled</div>
     </header>
 
     <section class="panel">
@@ -468,6 +468,8 @@
           <div class="card">
             <div class="card-title">Target deployment</div>
             <div class="input-row">
+              <label for="namespaceSelect">Namespace</label>
+              <select id="namespaceSelect"></select>
               <label for="targetSelect">Select deployment</label>
               <select id="targetSelect"></select>
             </div>
@@ -602,6 +604,7 @@
   const configPills = document.getElementById('configPills');
   const derivedInfo = document.getElementById('derivedInfo');
   const scaleHint = document.getElementById('scaleHint');
+  const namespaceSelect = document.getElementById('namespaceSelect');
   const targetSelect = document.getElementById('targetSelect');
   const targetHint = document.getElementById('targetHint');
   const tabs = Array.from(document.querySelectorAll('.tab'));
@@ -661,6 +664,15 @@
   let eventSource = null;
   let sseDone = false;
   let sseJobId = null;
+  let sseLastEventId = null;
+  let reconnectTimer = null;
+  let reconnectNoticeShown = false;
+
+  const CLIENT_LIMITS = CONFIG.clientLimits || {};
+  const MAX_LOG_LINES = Number.isFinite(CLIENT_LIMITS.maxLogLines) ? CLIENT_LIMITS.maxLogLines : 1500;
+  const MAX_EVENT_ROWS_PER_RUN = Number.isFinite(CLIENT_LIMITS.maxEventRowsPerRun) ? CLIENT_LIMITS.maxEventRowsPerRun : 500;
+  const MAX_EVENT_HISTORY_RUNS = Number.isFinite(CLIENT_LIMITS.maxEventHistoryRuns) ? CLIENT_LIMITS.maxEventHistoryRuns : 12;
+  const MAX_STATUS_SAMPLES = Number.isFinite(CLIENT_LIMITS.maxStatusSamples) ? CLIENT_LIMITS.maxStatusSamples : 1500;
 
   const eventHistory = [];
   let currentRunRows = [];
@@ -685,10 +697,38 @@
   }
 
   function insertEventRowSorted(row) {
+    const lastRow = currentRunRows[currentRunRows.length - 1];
+    if (!lastRow || compareEventRows(lastRow, row) <= 0) {
+      currentRunRows.push(row);
+      const trimmed = trimCurrentRunRows();
+      if (eventsTable && activeEventTab === 'current') {
+        if (trimmed) {
+          renderEventsTable();
+        } else {
+          eventsTable.appendChild(row.cloneNode(true));
+        }
+      }
+      return;
+    }
+
     currentRunRows = currentRunRows.concat([row]).sort(compareEventRows);
+    trimCurrentRunRows();
     if (!eventsTable || activeEventTab !== 'current') return;
     eventsTable.innerHTML = '';
     currentRunRows.forEach((r) => eventsTable.appendChild(r.cloneNode(true)));
+  }
+
+  function trimCurrentRunRows() {
+    if (MAX_EVENT_ROWS_PER_RUN < 0) return;
+    if (currentRunRows.length <= MAX_EVENT_ROWS_PER_RUN) return false;
+    currentRunRows.splice(0, currentRunRows.length - MAX_EVENT_ROWS_PER_RUN);
+    return true;
+  }
+
+  function trimEventHistory() {
+    if (MAX_EVENT_HISTORY_RUNS < 0) return;
+    if (eventHistory.length <= MAX_EVENT_HISTORY_RUNS) return;
+    eventHistory.splice(MAX_EVENT_HISTORY_RUNS);
   }
 
   function renderEventsTable() {
@@ -746,18 +786,101 @@
   });
 
   let autoScrollLogs = true;
-  let lastLogLine = null;
+
+  function closeLogStream() {
+    if (reconnectTimer) {
+      window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  }
+
+  function buildStreamUrl(jobId) {
+    const url = new URL('/api/stream/' + encodeURIComponent(jobId), window.location.origin);
+    if (Number.isFinite(sseLastEventId)) {
+      url.searchParams.set('since_id', String(sseLastEventId));
+    }
+    return url.toString();
+  }
+
+  function scheduleStreamReconnect() {
+    if (sseDone || !sseJobId || reconnectTimer) return;
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = null;
+      if (sseDone || !sseJobId) return;
+      if (eventSource && eventSource.readyState !== EventSource.CLOSED) return;
+      connectLogStream(sseJobId, true);
+    }, 2000);
+  }
+
+  function connectLogStream(jobId, isReconnect) {
+    if (eventSource) {
+      eventSource.close();
+    }
+    const source = new EventSource(buildStreamUrl(jobId));
+    eventSource = source;
+
+    source.onopen = () => {
+      if (eventSource !== source) return;
+      if (reconnectNoticeShown || isReconnect) {
+        addLog('Log stream reconnected.');
+      }
+      reconnectNoticeShown = false;
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    };
+
+    source.onmessage = (event) => {
+      if (eventSource !== source) return;
+      const eventId = parseInt(event.lastEventId || '', 10);
+      if (Number.isFinite(eventId)) {
+        if (Number.isFinite(sseLastEventId) && eventId <= sseLastEventId) {
+          return;
+        }
+        sseLastEventId = eventId;
+      }
+      addLog(event.data);
+    };
+
+    source.addEventListener('done', () => {
+      if (eventSource !== source) return;
+      sseDone = true;
+      reconnectNoticeShown = false;
+      addLog('Log stream closed.');
+      closeLogStream();
+    });
+
+    source.onerror = () => {
+      if (eventSource !== source || sseDone) return;
+      if (!reconnectNoticeShown) {
+        addLog('Log stream interrupted. Waiting to reconnect...');
+        reconnectNoticeShown = true;
+      }
+      if (source.readyState === EventSource.CLOSED) {
+        scheduleStreamReconnect();
+      }
+    };
+  }
 
   function addLog(line) {
-    if (line === lastLogLine) {
-      return;
-    }
-    lastLogLine = line;
     state.logs.push(line);
+    if (MAX_LOG_LINES >= 0 && state.logs.length > MAX_LOG_LINES) {
+      state.logs.splice(0, state.logs.length - MAX_LOG_LINES);
+    }
     const div = document.createElement('div');
     div.className = 'log-line';
     div.textContent = line;
     logBox.appendChild(div);
+    if (MAX_LOG_LINES >= 0) {
+      while (logBox.childElementCount > MAX_LOG_LINES) {
+        logBox.removeChild(logBox.firstChild);
+      }
+    }
     if (autoScrollLogs) {
       logBox.scrollTop = logBox.scrollHeight;
     }
@@ -769,12 +892,14 @@
       state.logs = [];
       logBox.innerHTML = '';
     }
+    currentRunRows = [];
     if (eventsTable) {
       eventsTable.innerHTML = '';
     }
     state.startTimeMs = null;
     state.endTimeMs = null;
     state.expectedNodes = null;
+    state.allNodes = null;
     state.desiredPods = null;
     state.statusSamples = [];
     state.lastStatusKey = null;
@@ -803,19 +928,19 @@
 
   async function loadDeployments() {
     if (!targetSelect) return;
-    const current = CONFIG.targetNamespace + '/' + CONFIG.targetDeployment;
+    const namespace = (namespaceSelect && namespaceSelect.value) || CONFIG.targetNamespace;
     const fallbackOption = () => {
       targetSelect.innerHTML = '';
       const opt = document.createElement('option');
-      opt.value = current;
-      opt.textContent = current;
+      opt.value = CONFIG.targetDeployment;
+      opt.textContent = CONFIG.targetDeployment;
       targetSelect.appendChild(opt);
-      targetSelect.value = current;
-      syncTargetReplicas(CONFIG.targetNamespace, CONFIG.targetDeployment);
+      targetSelect.value = CONFIG.targetDeployment;
+      syncTargetReplicas(namespace, CONFIG.targetDeployment);
     };
 
     try {
-      const res = await fetch('/api/deployments');
+      const res = await fetch(`/api/deployments?namespace=${encodeURIComponent(namespace)}`);
       if (!res.ok) {
         targetHint.textContent = 'Failed to load deployments.';
         fallbackOption();
@@ -826,27 +951,26 @@
       const items = data.items || [];
       items.forEach((item) => {
         const opt = document.createElement('option');
-        opt.value = item.namespace + '/' + item.name;
-        opt.textContent = item.namespace + '/' + item.name;
+        opt.value = item.name;
+        opt.textContent = item.name;
         targetSelect.appendChild(opt);
       });
-      const match = items.find((i) => i.namespace + '/' + i.name === current);
+      const match = items.find((i) => i.name === CONFIG.targetDeployment);
       if (match) {
-        targetSelect.value = current;
+        targetSelect.value = CONFIG.targetDeployment;
       } else if (items.length) {
-        targetSelect.value = items[0].namespace + '/' + items[0].name;
+        targetSelect.value = items[0].name;
       }
       if (targetSelect.value) {
-        const parts = targetSelect.value.split('/');
-        if (parts.length === 2) {
-          CONFIG.targetNamespace = parts[0];
-          CONFIG.targetDeployment = parts[1];
-        }
+        CONFIG.targetNamespace = namespace;
+        CONFIG.targetDeployment = targetSelect.value;
         renderConfig();
         syncTargetReplicas(CONFIG.targetNamespace, CONFIG.targetDeployment);
       }
       if (!items.length) {
-        targetHint.textContent = 'No deployments found (K8s disabled).';
+        targetHint.textContent = 'No deployments found in namespace ' + namespace + '.';
+      } else {
+        targetHint.textContent = 'Target set to ' + namespace + '/' + targetSelect.value + '.';
       }
     } catch (err) {
       targetHint.textContent = 'Failed to load deployments.';
@@ -854,11 +978,45 @@
     }
   }
 
-  async function updateTarget(value) {
-    if (!value) return;
-    const parts = value.split('/');
-    if (parts.length !== 2) return;
-    const [namespace, deployment] = parts;
+  async function loadNamespaces() {
+    if (!namespaceSelect) return;
+
+    const fallbackOption = () => {
+      namespaceSelect.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = CONFIG.targetNamespace;
+      opt.textContent = CONFIG.targetNamespace;
+      namespaceSelect.appendChild(opt);
+      namespaceSelect.value = CONFIG.targetNamespace;
+    };
+
+    try {
+      const res = await fetch('/api/namespaces');
+      if (!res.ok) {
+        fallbackOption();
+        return;
+      }
+      const data = await res.json();
+      const items = Array.isArray(data.items) ? data.items.slice() : [];
+      if (!items.includes(CONFIG.targetNamespace)) {
+        items.push(CONFIG.targetNamespace);
+      }
+      items.sort();
+      namespaceSelect.innerHTML = '';
+      items.forEach((item) => {
+        const opt = document.createElement('option');
+        opt.value = item;
+        opt.textContent = item;
+        namespaceSelect.appendChild(opt);
+      });
+      namespaceSelect.value = CONFIG.targetNamespace;
+    } catch (err) {
+      fallbackOption();
+    }
+  }
+
+  async function updateTarget(namespace, deployment) {
+    if (!namespace || !deployment) return;
     try {
       const res = await fetch('/api/target', {
         method: 'POST',
@@ -880,8 +1038,7 @@
   }
 
   function setDerived() {
-    const pods = parseInt(podsInput.value || '0', 10);
-    derivedInfo.textContent = 'Autoscaler-managed node scaling.';
+    derivedInfo.textContent = 'External node scaling observed from cluster-autoscaler or Karpenter.';
   }
 
   function renderConfig() {
@@ -999,6 +1156,9 @@
       allNodes,
       allReady,
     });
+    if (MAX_STATUS_SAMPLES >= 0 && state.statusSamples.length > MAX_STATUS_SAMPLES) {
+      state.statusSamples.splice(0, state.statusSamples.length - MAX_STATUS_SAMPLES);
+    }
     drawChart();
   }
 
@@ -1019,7 +1179,8 @@
         return;
       }
       if (currentRunRows.length) {
-        eventHistory.unshift({ startedAt: state.startTimeMs, rows: currentRunRows });
+        eventHistory.unshift({ startedAt: state.startTimeMs, rows: currentRunRows.slice() });
+        trimEventHistory();
       }
       currentRunRows = [];
       state.seenScaleRequest = true;
@@ -1044,7 +1205,23 @@
       }
     }
 
-    const statusMatch = message.match(/Status: nodes (\d+) \(ready (\d+)\)(?:; all nodes: (\d+) \(ready (\d+)\))? \| pods ready (\d+)\/(\d+)/);
+    const controllerLogMatch = message.match(/^(Autoscaler|Karpenter) log \[([^\]]+)\]: (.+)$/);
+    if (controllerLogMatch) {
+      const controller = controllerLogMatch[1];
+      const source = controllerLogMatch[2];
+      const controllerMessage = controllerLogMatch[3];
+      const elapsed = elapsedSinceStart(ts);
+      const duration = elapsed !== null ? elapsed.toFixed(1) + 's' : '—';
+      const lower = controllerMessage.toLowerCase();
+      let eventName = controller + ' log';
+      if (/(scale[- ]?up|scaleup|provision|nodeclaim|launch|unschedul|register|initializ|ready)/.test(lower)) {
+        eventName = controller + ' scaling log';
+      }
+      appendEventRow(eventName, scheduledAt, duration, source + ': ' + controllerMessage, new Date(ts).toISOString(), { controller, source, message: controllerMessage, elapsedSec: elapsed }, Number.isFinite(ts) ? ts : null);
+      updateSummary();
+    }
+
+    const statusMatch = message.match(/^Status: nodes (\d+) \(ready (\d+)\)(?:; all nodes: (\d+) \(ready (\d+)\))? \| pods ready (\d+)\/(\d+)/);
     if (statusMatch) {
       const nodesTotal = parseInt(statusMatch[1], 10);
       const nodesReady = parseInt(statusMatch[2], 10);
@@ -1371,25 +1548,12 @@
         return;
       }
       const data = await response.json();
-      if (eventSource) {
-        eventSource.close();
-      }
+      closeLogStream();
       sseDone = false;
       sseJobId = data.jobId;
-      eventSource = new EventSource('/api/stream/' + data.jobId);
-      eventSource.onmessage = (event) => addLog(event.data);
-      eventSource.addEventListener('done', () => {
-        sseDone = true;
-        addLog('Log stream closed.');
-        if (eventSource) {
-          eventSource.close();
-        }
-      });
-      eventSource.onerror = () => {
-        if (!sseDone) {
-          addLog('Log stream error. Reconnecting...');
-        }
-      };
+      sseLastEventId = null;
+      reconnectNoticeShown = false;
+      connectLogStream(data.jobId, false);
     } catch (err) {
       addLog('Scale request error: ' + err);
     }
@@ -1459,7 +1623,17 @@
   exportChart.addEventListener('click', exportGraph);
   refreshChart.addEventListener('click', drawChart);
   if (targetSelect) {
-    targetSelect.addEventListener('change', (event) => updateTarget(event.target.value));
+    targetSelect.addEventListener('change', (event) => updateTarget(namespaceSelect ? namespaceSelect.value : CONFIG.targetNamespace, event.target.value));
+  }
+  if (namespaceSelect) {
+    namespaceSelect.addEventListener('change', async (event) => {
+      CONFIG.targetNamespace = event.target.value;
+      renderConfig();
+      await loadDeployments();
+      if (targetSelect && targetSelect.value) {
+        await updateTarget(CONFIG.targetNamespace, targetSelect.value);
+      }
+    });
   }
   window.addEventListener('resize', drawChart);
   if (timeRange) {
@@ -1490,7 +1664,7 @@
 
   updateTimeRangeControls();
   renderConfig();
-  loadDeployments();
+  loadNamespaces().then(loadDeployments);
   setEventTab('current');
   setDerived();
   updateSummary();
